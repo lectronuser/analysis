@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+import os
 import argparse
 import numpy as np
 import pandas as pd
@@ -20,6 +21,10 @@ parser.add_argument("index", nargs="?", default=str(default_file_index),
                     help="Index of the pose CSV file (e.g., 1 for pose_1.csv)")
 args = parser.parse_args()
 csv_file = data_dir / f"pose_{args.index}.csv"
+csv_output_dir = data_dir / "output" / "report"
+os.makedirs(csv_output_dir, exist_ok=True)
+
+csv_output_file = csv_output_dir / f"pose_{args.index}.csv"
 
 time_column = "timestamp"
 px4_prefix = "PX4 Pose"
@@ -114,7 +119,7 @@ print(f"Total Distance Difference: {total_distance_difference:.2f} meters")
 print(f"Total Distance Difference Range: {total_distance_difference_range:.2f} %\n")
 
 # ==== Save Report as PDF ====
-pdf_filename = str(csv_file).replace(".csv", "_report.pdf")
+pdf_filename = str(csv_output_file).replace(".csv", "_report.pdf")
 with PdfPages(pdf_filename) as pdf:
     # Trajectory Plot
     plt.figure(figsize=(10, 8))
