@@ -29,6 +29,8 @@ csv_output_file = csv_output_dir / f"pose_{args.index}.csv"
 time_column = "timestamp"
 px4_prefix = "PX4 Pose"
 vio_prefix = "VIO Pose"
+px4_vel_prefix = "PX4 Vel"
+vio_vel_prefix = "VIO Vel"
 rpe_delta = 1  # Δt = 1 index (e.g., 100ms if 10Hz)
 
 # ==== Load CSV ====
@@ -48,6 +50,32 @@ if missing:
 # ==== Extract and Align ====
 px4_xyz = df[[f"{px4_prefix} X", f"{px4_prefix} Y", f"{px4_prefix} Z"]].values
 vio_xyz = df[[f"{vio_prefix} X", f"{vio_prefix} Y", f"{vio_prefix} Z"]].values
+
+
+
+# ==== Velocity Statistics ====
+required_vel_columns = [f"{px4_vel_prefix} X", f"{px4_vel_prefix} Y", f"{px4_vel_prefix} Z",
+                        f"{vio_vel_prefix} X", f"{vio_vel_prefix} Y", f"{vio_vel_prefix} Z"]
+missing_vel = [col for col in required_vel_columns if col not in df.columns]
+if missing_vel:
+    print(f"Missing velocity columns in CSV: {missing_vel}")
+else:
+    px4_vel = df[[f"{px4_vel_prefix} X", f"{px4_vel_prefix} Y", f"{px4_vel_prefix} Z"]].values
+    vio_vel = df[[f"{vio_vel_prefix} X", f"{vio_vel_prefix} Y", f"{vio_vel_prefix} Z"]].values
+
+    px4_speeds = np.linalg.norm(px4_vel, axis=1)
+    vio_speeds = np.linalg.norm(vio_vel, axis=1)
+
+    mean_px4_speed = np.mean(px4_speeds)
+    max_px4_speed = np.max(px4_speeds)
+    min_px4_speed = np.min(px4_speeds)
+    std_px4_speed = np.std(px4_speeds)
+
+    mean_vio_speed = np.mean(vio_speeds)
+    max_vio_speed = np.max(vio_speeds)
+    min_vio_speed = np.min(vio_speeds)
+    std_vio_speed = np.std(vio_speeds)
+
 
 def align_trajectories(vio, gt):
     vio_mean = np.mean(vio, axis=0)
@@ -99,6 +127,14 @@ vio_total_distance = np.sum(vio_distances)
 total_distance_difference = np.abs(px4_total_distance - vio_total_distance)
 total_distance_difference_range = total_distance_difference / px4_total_distance * 100
 
+max_px4_height = px4_xyz[:, 2].max()
+min_px4_height = px4_xyz[:, 2].min()
+mean_px4_height = px4_xyz[:, 2].mean()
+
+max_vio_height = vio_xyz[:, 2].max()
+min_vio_height = vio_xyz[:, 2].min()
+mean_vio_height = vio_xyz[:, 2].mean()
+
 # ==== Display Console Summary ====
 print("\n== ATE (Absolute Trajectory Error) ==")
 print(f"RMSE   : {ate_rmse:.4f} m")
@@ -117,6 +153,27 @@ print(f"PX4 Total Distance: {px4_total_distance:.2f} meters")
 print(f"VIO Total Distance: {vio_total_distance:.2f} meters")
 print(f"Total Distance Difference: {total_distance_difference:.2f} meters")
 print(f"Total Distance Difference Range: {total_distance_difference_range:.2f} %\n")
+
+print(f"Max height of PX4 estimate is {max_px4_height}")
+print(f"Min height of PX4 estimate is {min_px4_height}")
+print(f"Mean height of PX4 estimate is {mean_px4_height}\n")
+
+print(f"Max height of VIO estimate is {max_vio_height}")
+print(f"Min height of VIO estimate is {min_vio_height}")
+print(f"Mean height of VIO estimate is {mean_vio_height}\n")
+
+if not missing_vel:
+    print("== PX4 Velocity Statistics ==")
+    print(f"Mean speed: {mean_px4_speed:.2f} m/s")
+    print(f"Max speed : {max_px4_speed:.2f} m/s")
+    print(f"Min speed : {min_px4_speed:.2f} m/s")
+    print(f"STD speed : {std_px4_speed:.2f} m/s\n")
+
+    print("== VIO Velocity Statistics ==")
+    print(f"Mean speed: {mean_vio_speed:.2f} m/s")
+    print(f"Max speed : {max_vio_speed:.2f} m/s")
+    print(f"Min speed : {min_vio_speed:.2f} m/s")
+    print(f"STD speed : {std_vio_speed:.2f} m/s\n")
 
 # ==== Save Report as PDF ====
 pdf_filename = str(csv_output_file).replace(".csv", "_report.pdf")
@@ -156,7 +213,33 @@ with PdfPages(pdf_filename) as pdf:
 
     Total Distance Difference: {total_distance_difference:.2f} meters
     Total Distance Difference Range: {total_distance_difference_range:.2f} %
+
+    == PX4 Height Statistics ==
+    Max height of PX4 estimate is {max_px4_height:.2f}
+    Min height of PX4 estimate is {min_px4_height:.2f}
+    Mean height of PX4 estimate is {mean_px4_height:.2f}
+
+    == VIO Height Statistics ==
+    Max height of  VIO estimate is {max_vio_height:.2f}
+    Min height of  VIO estimate is {min_vio_height:.2f}
+    Mean height of VIO estimate is {mean_vio_height:.2f}
     """
+
+    if not missing_vel:
+        text += f"""\n
+    == PX4 Velocity Statistics ==
+    Mean speed: {mean_px4_speed:.2f} m/s
+    Max speed : {max_px4_speed:.2f} m/s
+    Min speed : {min_px4_speed:.2f} m/s
+    STD speed : {std_px4_speed:.2f} m/s
+
+    == VIO Velocity Statistics ==
+    Mean speed: {mean_vio_speed:.2f} m/s
+    Max speed : {max_vio_speed:.2f} m/s
+    Min speed : {min_vio_speed:.2f} m/s
+    STD speed : {std_vio_speed:.2f} m/s
+    """
+
     plt.axis('off')
     plt.text(0.01, 0.99, text, va='top', ha='left', fontsize=12, family='monospace')
     pdf.savefig(fig_text)
