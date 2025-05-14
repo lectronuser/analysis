@@ -8,24 +8,26 @@ import pandas as pd
 from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from mpl_toolkits.mplot3d import Axes3D
 
 
 class CSVVisualizer:
-    def __init__(self, input_path=None, output_format='screen', show_move=False):
+    def __init__(self, input_path=None, output_format='screen', show_move=False, show_move_3d=False):
         self.input_path = input_path or os.path.expanduser("~/data")
         self.output_format = output_format
         self.show_move = show_move
+        self.show_move_3d = show_move_3d
         self.today_str = datetime.today().strftime("%Y_%m_%d")
         
         self.column_pairs = [
             ("PX4 Pose X", "VIO Pose X"),
-            # ("PX4 Pose Y", "VIO Pose Y"),
-            # ("PX4 Pose Z", "VIO Pose Z", "Sensor Distance"),
-            # ("PX4 Pose Distance", "VIO Pose Distance")
+            ("PX4 Pose Y", "VIO Pose Y"),
+            ("PX4 Pose Z", "VIO Pose Z"),
+            ("PX4 Pose Distance", "VIO Pose Distance")
         ]
         
-        self.vio_move = ["VIO Pose X", "VIO Pose Y"]
-        self.px4_move = ["PX4 Pose X", "PX4 Pose Y"]
+        self.vio_move = ["VIO Pose X", "VIO Pose Y", "VIO Pose Z"]
+        self.px4_move = ["PX4 Pose X", "PX4 Pose Y", "PX4 Pose Z"]
         
         if output_format in ['pdf', 'png']:
             self.output_folder = os.path.join(self.input_path, "output", self.today_str)
@@ -93,13 +95,20 @@ class CSVVisualizer:
             self._create_info_page(file_name, title_name, info, pdf)
 
     def plot_movement(self, df, file_name, pdf=None):
-        if not all(col in df.columns for col in self.vio_move + self.px4_move):
-            print(f"{file_name} içinde hareket verisi için gerekli sütunlar bulunamadı.")
+        if not (self.show_move or self.show_move_3d):
             return
             
+        if self.show_move_3d and all(col in df.columns for col in self.vio_move + self.px4_move):
+            self._plot_3d_movement(df, file_name, pdf)
+        elif self.show_move and all(col in df.columns for col in self.vio_move[:2] + self.px4_move[:2]):
+            self._plot_2d_movement(df, file_name, pdf)
+        else:
+            print(f"{file_name} içinde hareket verisi için gerekli sütunlar bulunamadı.")
+
+    def _plot_2d_movement(self, df, file_name, pdf=None):
         plt.figure(figsize=(10, 10))
         
-        if all(col in df.columns for col in self.vio_move):
+        if all(col in df.columns for col in self.vio_move[:2]):
             vio_x = df[self.vio_move[0]].to_numpy() 
             vio_y = df[self.vio_move[1]].to_numpy() 
             plt.plot(vio_x, vio_y, 
@@ -109,7 +118,7 @@ class CSVVisualizer:
             plt.scatter(vio_x[-1], vio_y[-1], 
                     color='red', marker='x', s=100, label='VIO End')
         
-        if all(col in df.columns for col in self.px4_move):
+        if all(col in df.columns for col in self.px4_move[:2]):
             px4_x = df[self.px4_move[0]].to_numpy()  
             px4_y = df[self.px4_move[1]].to_numpy()  
             plt.plot(px4_x, px4_y, 
@@ -126,16 +135,57 @@ class CSVVisualizer:
         plt.grid(True)
         plt.axis('equal')
         
+        self._save_or_show_plot(file_name + "_2d_movement", pdf)
+
+    def _plot_3d_movement(self, df, file_name, pdf=None):
+        fig = plt.figure(figsize=(12, 10))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        if all(col in df.columns for col in self.vio_move):
+            vio_x = df[self.vio_move[0]].to_numpy()
+            vio_y = df[self.vio_move[1]].to_numpy()
+            vio_z = df[self.vio_move[2]].to_numpy()
+            ax.plot(vio_x, vio_y, vio_z, 
+                   label='VIO Movement', color='blue', linestyle='-')
+            ax.scatter(vio_x[0], vio_y[0], vio_z[0], 
+                      color='green', marker='o', s=100, label='VIO Start')
+            ax.scatter(vio_x[-1], vio_y[-1], vio_z[-1], 
+                      color='red', marker='x', s=100, label='VIO End')
+        
+        if all(col in df.columns for col in self.px4_move):
+            px4_x = df[self.px4_move[0]].to_numpy()
+            px4_y = df[self.px4_move[1]].to_numpy()
+            px4_z = df[self.px4_move[2]].to_numpy()
+            ax.plot(px4_x, px4_y, px4_z, 
+                   label='PX4 Movement', color='orange', linestyle='--')
+            ax.scatter(px4_x[0], px4_y[0], px4_z[0], 
+                      color='cyan', marker='o', s=100, label='PX4 Start')
+            ax.scatter(px4_x[-1], px4_y[-1], px4_z[-1], 
+                      color='purple', marker='x', s=100, label='PX4 End')
+        
+        ax.set_title(f"{file_name} - 3D Movement Comparison")
+        ax.set_xlabel("X Position (m)")
+        ax.set_ylabel("Y Position (m)")
+        ax.set_zlabel("Z Position (m)")
+        ax.legend()
+        ax.grid(True)
+        
+        self._save_or_show_plot(file_name + "_3d_movement", pdf, fig)
+
+    def _save_or_show_plot(self, file_name, pdf=None, fig=None):
+        if fig is None:
+            fig = plt.gcf()
+            
         if self.output_format == 'screen':
             plt.show()
         elif self.output_format == 'pdf':
-            pdf.savefig()
+            pdf.savefig(fig)
         elif self.output_format == 'png':
-            output_path = os.path.join(self.output_folder, f"{file_name}_movement_comparison.png")
-            plt.savefig(output_path, dpi=300)
+            output_path = os.path.join(self.output_folder, f"{file_name}.png")
+            fig.savefig(output_path, dpi=300)
             print(f"PNG kaydedildi: {output_path}")
         
-        plt.close()
+        plt.close(fig)
 
     def _set_plot_info(self, title):
         plt.title(title)
@@ -197,9 +247,7 @@ class CSVVisualizer:
             for col_pair in self.column_pairs:
                 self.plot_graph(df, col_pair, file_name, pdf)
             
-            # Add movement visualization if requested
-            if self.show_move:
-                self.plot_movement(df, file_name, pdf)
+            self.plot_movement(df, file_name, pdf)
                 
         except Exception as e:
             print(f"{csv_file} işlenirken hata oluştu: {e}")
@@ -211,13 +259,16 @@ def main():
                        help='Çıktı formatı (screen, pdf, png) - varsayılan: screen')
     parser.add_argument('--show-move', action='store_true',
                        help='PX4 ve VIO X-Y hareket grafiğini göster')
+    parser.add_argument('--show-move-3d', action='store_true',
+                       help='PX4 ve VIO 3B hareket grafiğini göster (X-Y-Z)')
     
     args = parser.parse_args()
     
     try:
         visualizer = CSVVisualizer(input_path=args.input, 
                                  output_format=args.out,
-                                 show_move=args.show_move)
+                                 show_move=args.show_move,
+                                 show_move_3d=args.show_move_3d)
         visualizer.process_files()
     except Exception as e:
         print(f"Hata oluştu: {e}")
