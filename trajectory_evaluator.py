@@ -32,6 +32,7 @@ vio_prefix = "VIO Pose"
 px4_vel_prefix = "PX4 Vel"
 vio_vel_prefix = "VIO Vel"
 rpe_delta = 1  # Δt = 1 index (e.g., 100ms if 10Hz)
+period = 0.1 # 100ms
 
 # ==== Load CSV ====
 with open(csv_file, "r") as f:
@@ -135,7 +136,12 @@ max_vio_height = vio_xyz[:, 2].max()
 min_vio_height = vio_xyz[:, 2].min()
 mean_vio_height = vio_xyz[:, 2].mean()
 
+rows_size = df.shape[0]
+time_consumption = rows_size * period
 # ==== Display Console Summary ====
+print("\n========= SUMMARY =========\n")
+print(f"Time consumption: {time_consumption:.2f} seconds\n")
+
 print("\n== ATE (Absolute Trajectory Error) ==")
 print(f"RMSE   : {ate_rmse:.4f} m")
 print(f"MEAN   : {ate_mean:.4f} m")
@@ -195,6 +201,8 @@ with PdfPages(pdf_filename) as pdf:
     # Summary Text
     fig_text = plt.figure(figsize=(8.5, 11))
     text = f"""
+    Time consumption: {time_consumption:.2f} seconds
+
     == ATE (Absolute Trajectory Error) ==
     RMSE   : {ate_rmse:.4f} m
     MEAN   : {ate_mean:.4f} m
