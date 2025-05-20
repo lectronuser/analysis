@@ -5,6 +5,7 @@ import re
 import glob
 import argparse
 import pandas as pd
+import numpy as np
 from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -20,9 +21,7 @@ class CSVVisualizer:
         self.today_str = datetime.today().strftime("%Y_%m_%d")
         
         self.column_pairs = [
-            ("PX4 Pose X", "VIO Pose X"),
-            ("PX4 Pose Y", "VIO Pose Y"),
-            ("PX4 Pose Z", "VIO Pose Z"),
+            ("PX4 Pose X", "PX4 Pose Y", "VIO Pose X", "VIO Pose Y"),
             ("PX4 Pose Distance", "VIO Pose Distance")
         ]
         
@@ -37,6 +36,27 @@ class CSVVisualizer:
                 self.output_file = os.path.join(self.output_folder, f"analysis_{self.today_str}.pdf")
             else:
                 self.output_file = None
+
+    def align_trajectories(self, vio, gt):
+        """
+        Align VIO trajectory to PX4 (ground truth) trajectory using Umeyama algorithm
+        """
+        vio_mean = np.mean(vio, axis=0)
+        gt_mean = np.mean(gt, axis=0)
+        vio_centered = vio - vio_mean
+        gt_centered = gt - gt_mean
+
+        H = vio_centered.T @ gt_centered
+        U, _, Vt = np.linalg.svd(H)
+        R_align = Vt.T @ U.T
+
+        if np.linalg.det(R_align) < 0:
+            Vt[-1, :] *= -1
+            R_align = Vt.T @ U.T
+
+        t_align = gt_mean - R_align @ vio_mean
+        vio_aligned = (R_align @ vio.T).T + t_align
+        return vio_aligned
 
     def sort_natural(self, files):
         return sorted(files, key=lambda x: [int(c) if c.isdigit() else c for c in re.split('([0-9]+)', x)])
@@ -108,27 +128,28 @@ class CSVVisualizer:
     def _plot_2d_movement(self, df, file_name, pdf=None):
         plt.figure(figsize=(10, 10))
         
-        if all(col in df.columns for col in self.vio_move[:2]):
-            vio_x = df[self.vio_move[0]].to_numpy() 
-            vio_y = df[self.vio_move[1]].to_numpy() 
-            plt.plot(vio_x, vio_y, 
-                    label='VIO Movement', color='blue', linestyle='-')
-            plt.scatter(vio_x[0], vio_y[0], 
-                    color='green', marker='o', s=100, label='VIO Start')
-            plt.scatter(vio_x[-1], vio_y[-1], 
-                    color='red', marker='x', s=100, label='VIO End')
+        if all(col in df.columns for col in self.px4_move[:2] + self.vio_move[:2]):
+            px4_xy = df[self.px4_move[:2]].values
+            vio_xy = df[self.vio_move[:2]].values
+            
+            # Align VIO trajectory to PX4
+            vio_aligned = self.align_trajectories(vio_xy, px4_xy)
+            
+            plt.plot(px4_xy[:, 0], px4_xy[:, 1], 
+                    label='PX4 Movement', color='orange', linestyle='-', linewidth=2)
+            plt.scatter(px4_xy[0, 0], px4_xy[0, 1], 
+                    color='green', marker='o', s=100, label='PX4 Start')
+            plt.scatter(px4_xy[-1, 0], px4_xy[-1, 1], 
+                    color='red', marker='x', s=100, label='PX4 End')
+            
+            plt.plot(vio_aligned[:, 0], vio_aligned[:, 1], 
+                    label='VIO Movement (Aligned)', color='blue', linestyle='--', linewidth=2)
+            plt.scatter(vio_aligned[0, 0], vio_aligned[0, 1], 
+                    color='cyan', marker='o', s=100, label='VIO Start')
+            plt.scatter(vio_aligned[-1, 0], vio_aligned[-1, 1], 
+                    color='purple', marker='x', s=100, label='VIO End')
         
-        if all(col in df.columns for col in self.px4_move[:2]):
-            px4_x = df[self.px4_move[0]].to_numpy()  
-            px4_y = df[self.px4_move[1]].to_numpy()  
-            plt.plot(px4_x, px4_y, 
-                    label='PX4 Movement', color='orange', linestyle='--')
-            plt.scatter(px4_x[0], px4_y[0], 
-                    color='cyan', marker='o', s=100, label='PX4 Start')
-            plt.scatter(px4_x[-1], px4_y[-1], 
-                    color='purple', marker='x', s=100, label='PX4 End')
-        
-        plt.title(f"{file_name} - X-Y Movement Comparison")
+        plt.title(f"{file_name} - X-Y Movement Comparison (Aligned)")
         plt.xlabel("X Position (m)")
         plt.ylabel("Y Position (m)")
         plt.legend()
@@ -141,29 +162,28 @@ class CSVVisualizer:
         fig = plt.figure(figsize=(12, 10))
         ax = fig.add_subplot(111, projection='3d')
         
-        if all(col in df.columns for col in self.vio_move):
-            vio_x = df[self.vio_move[0]].to_numpy()
-            vio_y = df[self.vio_move[1]].to_numpy()
-            vio_z = df[self.vio_move[2]].to_numpy()
-            ax.plot(vio_x, vio_y, vio_z, 
-                   label='VIO Movement', color='blue', linestyle='-')
-            ax.scatter(vio_x[0], vio_y[0], vio_z[0], 
-                      color='green', marker='o', s=100, label='VIO Start')
-            ax.scatter(vio_x[-1], vio_y[-1], vio_z[-1], 
-                      color='red', marker='x', s=100, label='VIO End')
+        if all(col in df.columns for col in self.px4_move + self.vio_move):
+            px4_xyz = df[self.px4_move].values
+            vio_xyz = df[self.vio_move].values
+            
+            # Align VIO trajectory to PX4 in 3D
+            vio_aligned = self.align_trajectories(vio_xyz, px4_xyz)
+            
+            ax.plot(px4_xyz[:, 0], px4_xyz[:, 1], px4_xyz[:, 2],
+                   label='PX4 Movement', color='orange', linestyle='-', linewidth=2)
+            ax.scatter(px4_xyz[0, 0], px4_xyz[0, 1], px4_xyz[0, 2],
+                      color='green', marker='o', s=100, label='PX4 Start')
+            ax.scatter(px4_xyz[-1, 0], px4_xyz[-1, 1], px4_xyz[-1, 2],
+                      color='red', marker='x', s=100, label='PX4 End')
+            
+            ax.plot(vio_aligned[:, 0], vio_aligned[:, 1], vio_aligned[:, 2],
+                   label='VIO Movement (Aligned)', color='blue', linestyle='--', linewidth=2)
+            ax.scatter(vio_aligned[0, 0], vio_aligned[0, 1], vio_aligned[0, 2],
+                      color='cyan', marker='o', s=100, label='VIO Start')
+            ax.scatter(vio_aligned[-1, 0], vio_aligned[-1, 1], vio_aligned[-1, 2],
+                      color='purple', marker='x', s=100, label='VIO End')
         
-        if all(col in df.columns for col in self.px4_move):
-            px4_x = df[self.px4_move[0]].to_numpy()
-            px4_y = df[self.px4_move[1]].to_numpy()
-            px4_z = df[self.px4_move[2]].to_numpy()
-            ax.plot(px4_x, px4_y, px4_z, 
-                   label='PX4 Movement', color='orange', linestyle='--')
-            ax.scatter(px4_x[0], px4_y[0], px4_z[0], 
-                      color='cyan', marker='o', s=100, label='PX4 Start')
-            ax.scatter(px4_x[-1], px4_y[-1], px4_z[-1], 
-                      color='purple', marker='x', s=100, label='PX4 End')
-        
-        ax.set_title(f"{file_name} - 3D Movement Comparison")
+        ax.set_title(f"{file_name} - 3D Movement Comparison (Aligned)")
         ax.set_xlabel("X Position (m)")
         ax.set_ylabel("Y Position (m)")
         ax.set_zlabel("Z Position (m)")
