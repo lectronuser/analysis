@@ -13,40 +13,45 @@ from mpl_toolkits.mplot3d import Axes3D
 
 
 class CSVVisualizer:
-    def __init__(self, input_path=None, output_format='screen', show_move=False, show_move_3d=False):
+    def __init__(self, input_path=None, output_format='screen', show_dimension=None):
         self.input_path = input_path or os.path.expanduser("~/data")
         self.output_format = output_format
-        self.show_move = show_move
-        self.show_move_3d = show_move_3d
+        self.show_dimension = show_dimension  # None, 2 or 3
         self.today_str = datetime.today().strftime("%Y_%m_%d")
         
-        self.column_pairs = [
-            ("PX4 Pose X", "PX4 Pose Y", "VIO Pose X", "VIO Pose Y"),
-            ("PX4 Pose Distance", "VIO Pose Distance")
-        ]
+        # Define column groups
+        self.column_groups = {
+            '2d_pose': ("PX4 Pose X", "PX4 Pose Y", "VIO Pose X", "VIO Pose Y"),
+            'distance': ("PX4 Pose Distance", "VIO Pose Distance")
+        }
         
-        self.vio_move = ["VIO Pose X", "VIO Pose Y", "VIO Pose Z"]
-        self.px4_move = ["PX4 Pose X", "PX4 Pose Y", "PX4 Pose Z"]
+        self.movement_columns = {
+            'vio': ["VIO Pose X", "VIO Pose Y", "VIO Pose Z"],
+            'px4': ["PX4 Pose X", "PX4 Pose Y", "PX4 Pose Z"]
+        }
         
-        if output_format in ['pdf', 'png']:
+        self.setup_output()
+
+    def setup_output(self):
+        if self.output_format in ['pdf', 'png']:
             self.output_folder = os.path.join(self.input_path, "output", self.today_str)
             os.makedirs(self.output_folder, exist_ok=True)
             
-            if output_format == 'pdf':
+            if self.output_format == 'pdf':
                 self.output_file = os.path.join(self.output_folder, f"analysis_{self.today_str}.pdf")
             else:
                 self.output_file = None
 
-    def align_trajectories(self, vio, gt):
+    def align_trajectories(self, source, target):
         """
-        Align VIO trajectory to PX4 (ground truth) trajectory using Umeyama algorithm
+        Align source trajectory to target trajectory using Umeyama algorithm
         """
-        vio_mean = np.mean(vio, axis=0)
-        gt_mean = np.mean(gt, axis=0)
-        vio_centered = vio - vio_mean
-        gt_centered = gt - gt_mean
+        source_mean = np.mean(source, axis=0)
+        target_mean = np.mean(target, axis=0)
+        source_centered = source - source_mean
+        target_centered = target - target_mean
 
-        H = vio_centered.T @ gt_centered
+        H = source_centered.T @ target_centered
         U, _, Vt = np.linalg.svd(H)
         R_align = Vt.T @ U.T
 
@@ -54,9 +59,9 @@ class CSVVisualizer:
             Vt[-1, :] *= -1
             R_align = Vt.T @ U.T
 
-        t_align = gt_mean - R_align @ vio_mean
-        vio_aligned = (R_align @ vio.T).T + t_align
-        return vio_aligned
+        t_align = target_mean - R_align @ source_mean
+        aligned = (R_align @ source.T).T + t_align
+        return aligned
 
     def sort_natural(self, files):
         return sorted(files, key=lambda x: [int(c) if c.isdigit() else c for c in re.split('([0-9]+)', x)])
@@ -69,119 +74,128 @@ class CSVVisualizer:
         else:
             raise FileNotFoundError(f"Belirtilen yol bulunamadı: {self.input_path}")
 
-    def plot_graph(self, df, col_pair, file_name, pdf=None):
+    def create_plot(self, title, xlabel, ylabel):
+        """Helper function to create a standardized plot"""
         plt.figure(figsize=(10, 5))
-        title_name = ""
+        plt.title(title)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        plt.grid(True)
+        return plt.gcf()
+
+    def plot_graph(self, df, columns, file_name, pdf=None):
+        """Generic function to plot any set of columns"""
+        if not all(col in df.columns for col in columns):
+            missing = [col for col in columns if col not in df.columns]
+            print(f"{file_name} içinde eksik sütunlar: {', '.join(missing)}")
+            return
+
+        fig = self.create_plot(
+            title=f"{file_name} - {' vs '.join(columns)}",
+            xlabel="Time (s)",
+            ylabel="Distance (m)"
+        )
+        
         info = []
-        
-        for i, col in enumerate(col_pair):
-            if col in df.columns:
-                plt.plot(df[col], label=col, linestyle="-")
-                min_index = df[col].idxmin()
-                max_index = df[col].idxmax()
-                min_value = df[col].min()
-                max_value = df[col].max()
-                avg_value = df[col].mean()
-                info.append((col, min_value, max_value, avg_value))
-
-                plt.scatter(min_index, min_value, color="red", marker="o", s=50)
-                plt.scatter(max_index, max_value, color="blue", marker="o", s=50)
-
-                plt.annotate(f"Min: {min_value:.2f}", (min_index, min_value), 
-                            textcoords="offset points", xytext=(-15, 10), 
-                            ha='center', fontsize=8, color="red")
-                plt.annotate(f"Max: {max_value:.2f}", (max_index, max_value), 
-                            textcoords="offset points", xytext=(15, -10), 
-                            ha='center', fontsize=8, color="blue")
-            else:
-                print(f"{file_name} içinde '{col}' başlığı bulunamadı.")
+        for col in columns:
+            plt.plot(df[col], label=col, linestyle="-")
             
-            title_name += col + (" vs " if i < len(col_pair)-1 else "")
-
-        self._set_plot_info(file_name + " - " + title_name)
+            min_val, max_val = df[col].min(), df[col].max()
+            min_idx, max_idx = df[col].idxmin(), df[col].idxmax()
+            avg_val = df[col].mean()
+            info.append((col, min_val, max_val, avg_val))
+            
+            plt.scatter(min_idx, min_val, color="red", marker="o", s=50)
+            plt.scatter(max_idx, max_val, color="blue", marker="o", s=50)
+            
+            plt.annotate(f"Min: {min_val:.2f}", (min_idx, min_val), 
+                        textcoords="offset points", xytext=(-15, 10), 
+                        ha='center', fontsize=8, color="red")
+            plt.annotate(f"Max: {max_val:.2f}", (max_idx, max_val), 
+                        textcoords="offset points", xytext=(15, -10), 
+                        ha='center', fontsize=8, color="blue")
         
-        if self.output_format == 'screen':
-            plt.show()
-        elif self.output_format == 'pdf':
-            pdf.savefig()
-        elif self.output_format == 'png':
-            output_path = os.path.join(self.output_folder, f"{file_name}_{'_'.join(col_pair)}.png")
-            plt.savefig(output_path, dpi=300)
-            print(f"PNG kaydedildi: {output_path}")
+        plt.legend()
+        self.save_or_show_plot(fig, file_name, "_".join(columns), pdf)
         
-        plt.close()
-        
-        if self.output_format == 'pdf' and info:
-            self._create_info_page(file_name, title_name, info, pdf)
+        if self.output_format == 'pdf':
+            self.create_info_page(file_name, " vs ".join(columns), info, pdf)
 
     def plot_movement(self, df, file_name, pdf=None):
-        if not (self.show_move or self.show_move_3d):
+        """Plot movement in 2D or 3D based on show_dimension parameter"""
+        if not self.show_dimension:
             return
             
-        if self.show_move_3d and all(col in df.columns for col in self.vio_move + self.px4_move):
-            self._plot_3d_movement(df, file_name, pdf)
-        elif self.show_move and all(col in df.columns for col in self.vio_move[:2] + self.px4_move[:2]):
-            self._plot_2d_movement(df, file_name, pdf)
-        else:
+        # Get available dimensions (2 or 3)
+        dim = min(self.show_dimension, 3)  # In case someone passes > 3
+        vio_cols = self.movement_columns['vio'][:dim]
+        px4_cols = self.movement_columns['px4'][:dim]
+        
+        if not all(col in df.columns for col in vio_cols + px4_cols):
             print(f"{file_name} içinde hareket verisi için gerekli sütunlar bulunamadı.")
+            return
+            
+        if dim == 2:
+            self.plot_2d_movement(df, file_name, pdf)
+        else:
+            self.plot_3d_movement(df, file_name, pdf)
 
-    def _plot_2d_movement(self, df, file_name, pdf=None):
-        plt.figure(figsize=(10, 10))
+    def plot_2d_movement(self, df, file_name, pdf=None):
+        """Plot 2D movement comparison"""
+        vio_xy = df[self.movement_columns['vio'][:2]].values
+        px4_xy = df[self.movement_columns['px4'][:2]].values
+        vio_aligned = self.align_trajectories(vio_xy, px4_xy)
         
-        if all(col in df.columns for col in self.px4_move[:2] + self.vio_move[:2]):
-            px4_xy = df[self.px4_move[:2]].values
-            vio_xy = df[self.vio_move[:2]].values
-            
-            # Align VIO trajectory to PX4
-            vio_aligned = self.align_trajectories(vio_xy, px4_xy)
-            
-            plt.plot(px4_xy[:, 0], px4_xy[:, 1], 
-                    label='PX4 Movement', color='orange', linestyle='-', linewidth=2)
-            plt.scatter(px4_xy[0, 0], px4_xy[0, 1], 
-                    color='green', marker='o', s=100, label='PX4 Start')
-            plt.scatter(px4_xy[-1, 0], px4_xy[-1, 1], 
-                    color='red', marker='x', s=100, label='PX4 End')
-            
-            plt.plot(vio_aligned[:, 0], vio_aligned[:, 1], 
-                    label='VIO Movement (Aligned)', color='blue', linestyle='--', linewidth=2)
-            plt.scatter(vio_aligned[0, 0], vio_aligned[0, 1], 
-                    color='cyan', marker='o', s=100, label='VIO Start')
-            plt.scatter(vio_aligned[-1, 0], vio_aligned[-1, 1], 
-                    color='purple', marker='x', s=100, label='VIO End')
+        fig = self.create_plot(
+            title=f"{file_name} - X-Y Movement Comparison (Aligned)",
+            xlabel="X Position (m)",
+            ylabel="Y Position (m)"
+        )
         
-        plt.title(f"{file_name} - X-Y Movement Comparison (Aligned)")
-        plt.xlabel("X Position (m)")
-        plt.ylabel("Y Position (m)")
-        plt.legend()
-        plt.grid(True)
+        # Plot trajectories
+        plt.plot(px4_xy[:, 0], px4_xy[:, 1], 
+                label='PX4 Movement', color='orange', linestyle='-', linewidth=2)
+        plt.plot(vio_aligned[:, 0], vio_aligned[:, 1], 
+                label='VIO Movement (Aligned)', color='blue', linestyle='--', linewidth=2)
+        
+        # Plot start/end points
+        for data, color, prefix in [
+            (px4_xy, 'orange', 'PX4'),
+            (vio_aligned, 'blue', 'VIO')
+        ]:
+            plt.scatter(data[0, 0], data[0, 1], 
+                       color='green', marker='o', s=100, label=f'{prefix} Start')
+            plt.scatter(data[-1, 0], data[-1, 1], 
+                       color='red', marker='x', s=100, label=f'{prefix} End')
+        
         plt.axis('equal')
-        
-        self._save_or_show_plot(file_name + "_2d_movement", pdf)
+        plt.legend()
+        self.save_or_show_plot(fig, f"{file_name}_2d_movement", pdf=pdf)
 
-    def _plot_3d_movement(self, df, file_name, pdf=None):
+    def plot_3d_movement(self, df, file_name, pdf=None):
+        """Plot 3D movement comparison"""
         fig = plt.figure(figsize=(12, 10))
         ax = fig.add_subplot(111, projection='3d')
         
-        if all(col in df.columns for col in self.px4_move + self.vio_move):
-            px4_xyz = df[self.px4_move].values
-            vio_xyz = df[self.vio_move].values
-            
-            # Align VIO trajectory to PX4 in 3D
-            vio_aligned = self.align_trajectories(vio_xyz, px4_xyz)
-            
-            ax.plot(px4_xyz[:, 0], px4_xyz[:, 1], px4_xyz[:, 2],
-                   label='PX4 Movement', color='orange', linestyle='-', linewidth=2)
-            ax.scatter(px4_xyz[0, 0], px4_xyz[0, 1], px4_xyz[0, 2],
-                      color='green', marker='o', s=100, label='PX4 Start')
-            ax.scatter(px4_xyz[-1, 0], px4_xyz[-1, 1], px4_xyz[-1, 2],
-                      color='red', marker='x', s=100, label='PX4 End')
-            
-            ax.plot(vio_aligned[:, 0], vio_aligned[:, 1], vio_aligned[:, 2],
-                   label='VIO Movement (Aligned)', color='blue', linestyle='--', linewidth=2)
-            ax.scatter(vio_aligned[0, 0], vio_aligned[0, 1], vio_aligned[0, 2],
-                      color='cyan', marker='o', s=100, label='VIO Start')
-            ax.scatter(vio_aligned[-1, 0], vio_aligned[-1, 1], vio_aligned[-1, 2],
-                      color='purple', marker='x', s=100, label='VIO End')
+        vio_xyz = df[self.movement_columns['vio']].values
+        px4_xyz = df[self.movement_columns['px4']].values
+        vio_aligned = self.align_trajectories(vio_xyz, px4_xyz)
+        
+        # Plot trajectories
+        ax.plot(px4_xyz[:, 0], px4_xyz[:, 1], px4_xyz[:, 2],
+               label='PX4 Movement', color='orange', linestyle='-', linewidth=2)
+        ax.plot(vio_aligned[:, 0], vio_aligned[:, 1], vio_aligned[:, 2],
+               label='VIO Movement (Aligned)', color='blue', linestyle='--', linewidth=2)
+        
+        # Plot start/end points
+        for data, color, prefix in [
+            (px4_xyz, 'orange', 'PX4'),
+            (vio_aligned, 'blue', 'VIO')
+        ]:
+            ax.scatter(data[0, 0], data[0, 1], data[0, 2],
+                      color='green', marker='o', s=100, label=f'{prefix} Start')
+            ax.scatter(data[-1, 0], data[-1, 1], data[-1, 2],
+                      color='red', marker='x', s=100, label=f'{prefix} End')
         
         ax.set_title(f"{file_name} - 3D Movement Comparison (Aligned)")
         ax.set_xlabel("X Position (m)")
@@ -190,50 +204,38 @@ class CSVVisualizer:
         ax.legend()
         ax.grid(True)
         
-        self._save_or_show_plot(file_name + "_3d_movement", pdf, fig)
+        self.save_or_show_plot(fig, f"{file_name}_3d_movement", pdf=pdf)
 
-    def _save_or_show_plot(self, file_name, pdf=None, fig=None):
-        if fig is None:
-            fig = plt.gcf()
-            
+    def save_or_show_plot(self, fig, base_name=None, suffix="", pdf=None):
+        """Handle plot output based on output format"""
         if self.output_format == 'screen':
             plt.show()
-        elif self.output_format == 'pdf':
+        elif self.output_format == 'pdf' and pdf:
             pdf.savefig(fig)
-        elif self.output_format == 'png':
-            output_path = os.path.join(self.output_folder, f"{file_name}.png")
+        elif self.output_format == 'png' and base_name:
+            output_path = os.path.join(self.output_folder, f"{base_name}{suffix}.png")
             fig.savefig(output_path, dpi=300)
             print(f"PNG kaydedildi: {output_path}")
         
         plt.close(fig)
 
-    def _set_plot_info(self, title):
-        plt.title(title)
-        plt.xlabel("Time (s)")
-        plt.ylabel("Distance (m)")
-        plt.legend()
-        plt.grid(True)
-
-    def _create_info_page(self, file_name, title, info, pdf):
-        plt.figure(figsize=(10, 5))
+    def create_info_page(self, file_name, title, info, pdf):
+        """Create information page for PDF output"""
+        fig = plt.figure(figsize=(10, 5))
         plt.axis("off")
         plt.text(0.5, 1.0, f"Grafik: {file_name} - {title}", 
                 fontsize=12, ha='center')
         
-        cell_text = []
-        for col, min_val, max_val, avg_val in info:
-            cell_text.append([col, f"{min_val:.2f}", f"{max_val:.2f}", f"{avg_val:.2f}"])
-
-        column_labels = ["Sütun", "Min", "Max", "Ortalama"]
-        table = plt.table(cellText=cell_text, colLabels=column_labels, 
-                         loc="center", cellLoc='center', 
-                         colWidths=[0.3, 0.2, 0.2, 0.2])
-        table.auto_set_font_size(False)
-        table.set_fontsize(10)
-        table.scale(1.2, 1.2)
-
-        pdf.savefig()
-        plt.close()
+        cell_text = [[col, f"{min_val:.2f}", f"{max_val:.2f}", f"{avg_val:.2f}"] 
+                    for col, min_val, max_val, avg_val in info]
+        
+        plt.table(cellText=cell_text, 
+                 colLabels=["Sütun", "Min", "Max", "Ortalama"], 
+                 loc="center", cellLoc='center', 
+                 colWidths=[0.3, 0.2, 0.2, 0.2])
+        
+        pdf.savefig(fig)
+        plt.close(fig)
 
     def process_files(self):
         csv_files = self.get_csv_files()
@@ -245,28 +247,30 @@ class CSVVisualizer:
         if self.output_format == 'pdf':
             with PdfPages(self.output_file) as pdf:
                 for csv_file in csv_files:
-                    self._process_single_file(csv_file, pdf)
+                    self.process_single_file(csv_file, pdf)
             print(f"PDF oluşturuldu: {self.output_file}")
         else:
             for csv_file in csv_files:
-                self._process_single_file(csv_file)
+                self.process_single_file(csv_file)
 
-    def _process_single_file(self, csv_file, pdf=None):
+    def process_single_file(self, csv_file, pdf=None):
         try:
             df = pd.read_csv(csv_file)
             file_name = os.path.basename(csv_file).replace(".csv", "")
             
-            if self.output_format == 'pdf':
-                plt.figure(figsize=(10, 5))
+            if pdf:
+                fig = plt.figure(figsize=(10, 5))
                 plt.axis("off")
                 plt.text(0.5, 0.5, f"Veri Dosyası: {file_name}", 
                         fontsize=14, ha='center', va='center')
-                pdf.savefig()
-                plt.close()
+                pdf.savefig(fig)
+                plt.close(fig)
 
-            for col_pair in self.column_pairs:
-                self.plot_graph(df, col_pair, file_name, pdf)
+            # Plot all column groups
+            for group_name, columns in self.column_groups.items():
+                self.plot_graph(df, columns, file_name, pdf)
             
+            # Plot movement if requested
             self.plot_movement(df, file_name, pdf)
                 
         except Exception as e:
@@ -277,18 +281,17 @@ def main():
     parser.add_argument('input', nargs='?', help='CSV dosyası veya klasör yolu (varsayılan: ~/data)')
     parser.add_argument('--out', choices=['screen', 'pdf', 'png'], default='screen',
                        help='Çıktı formatı (screen, pdf, png) - varsayılan: screen')
-    parser.add_argument('--show-move', action='store_true',
-                       help='PX4 ve VIO X-Y hareket grafiğini göster')
-    parser.add_argument('--show-move-3d', action='store_true',
-                       help='PX4 ve VIO 3B hareket grafiğini göster (X-Y-Z)')
+    parser.add_argument('--show', type=int, choices=[2, 3], 
+                       help='Hareket grafiği boyutu (2: 2D, 3: 3D)')
     
     args = parser.parse_args()
     
     try:
-        visualizer = CSVVisualizer(input_path=args.input, 
-                                 output_format=args.out,
-                                 show_move=args.show_move,
-                                 show_move_3d=args.show_move_3d)
+        visualizer = CSVVisualizer(
+            input_path=args.input, 
+            output_format=args.out,
+            show_dimension=args.show
+        )
         visualizer.process_files()
     except Exception as e:
         print(f"Hata oluştu: {e}")
