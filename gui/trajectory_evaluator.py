@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import os
+import sys
+import subprocess
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -23,6 +25,8 @@ class TrajectoryEvaluator:
         self._vio_prefix = "VIO Pose"
         self._px4_vel_prefix = "PX4 Vel"
         self._vio_vel_prefix = "VIO Vel"
+
+        self.today_str = datetime.today().strftime("%Y_%m_%d")
         
         self.setup_output()
 
@@ -245,6 +249,14 @@ class TrajectoryEvaluator:
                     fontsize=12, family='monospace')
             pdf.savefig(fig_text)
             plt.close()
+
+            if sys.platform == "win32":
+                os.startfile(output_file)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", output_file])
+            else:
+                subprocess.run(["xdg-open", output_file])
+                print("bu kısım çalıştır")
 
         return output_file
 

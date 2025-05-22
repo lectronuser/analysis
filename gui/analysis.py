@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import sys
 import re
 import glob
 import pandas as pd
@@ -9,6 +10,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from mpl_toolkits.mplot3d import Axes3D
+import subprocess
 
 
 class CSVVisualizer:
@@ -246,11 +248,19 @@ class CSVVisualizer:
         }
 
     def _save_or_show_plot(self, fig, base_name=None, suffix="", pdf=None):
-        """Handle plot output based on output format"""
         if self._output_format == 'screen':
             plt.show()
         elif self._output_format == 'pdf' and pdf:
             pdf.savefig(fig)
+    
+            pdf_path = pdf._file.name  
+            if sys.platform == "win32":
+                os.startfile(pdf_path)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", pdf_path])
+            else:
+                subprocess.run(["xdg-open", pdf_path])
+                print("bu kısım çalıştır")
         elif self._output_format == 'png' and base_name and self._output_folder:
             output_path = os.path.join(self._output_folder, f"{base_name}{suffix}.png")
             fig.savefig(output_path, dpi=300)

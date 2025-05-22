@@ -2,7 +2,7 @@
 import os
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QComboBox, QFileDialog,
-                             QMessageBox, QProgressBar, QTabWidget, QGroupBox, QListWidget)
+                             QMessageBox, QProgressBar, QTabWidget, QGroupBox, QListWidget, QTextEdit)
 from PyQt5.QtCore import Qt
 from analysis import CSVVisualizer
 from trajectory_evaluator import TrajectoryEvaluator
@@ -39,7 +39,9 @@ class AnalysisApp:
         central_widget.setLayout(layout)
         self.window.setCentralWidget(central_widget)
         self.window.setWindowTitle("Veri Analiz Aracı")
-        self.window.resize(720, 480)
+        # self.window.resize(720, 480)
+        # self.window.showFullScreen() 
+        self.window.showMaximized()
 
     def setup_visualization_tab(self, tab):
         layout = QVBoxLayout()
@@ -106,7 +108,7 @@ class AnalysisApp:
 
     def setup_evaluation_tab(self, tab):
         layout = QVBoxLayout()
-        
+    
         file_group = QGroupBox("Veri Kaynağı")
         file_layout = QHBoxLayout()
         
@@ -143,6 +145,12 @@ class AnalysisApp:
         
         param_group.setLayout(param_layout)
         layout.addWidget(param_group)
+        
+        self.results_text = QTextEdit()
+        self.results_text.setReadOnly(True)
+        self.results_text.setFontFamily("Courier") 
+        layout.addWidget(QLabel("Değerlendirme Sonuçları:"))
+        layout.addWidget(self.results_text)
         
         eval_run_btn = QPushButton("Değerlendirmeyi Başlat")
         eval_run_btn.clicked.connect(self.run_evaluation)
@@ -196,12 +204,6 @@ class AnalysisApp:
             
             self.progress.setVisible(False)
             
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Information)
-            output_loc = self.visualizer._output_file if self.visualizer._output_file else 'ekranda gösterildi'
-            msg.setText(f"Görselleştirme tamamlandı!\nÇıktı: {output_loc}")
-            msg.exec_()
-            
         except Exception as e:
             QMessageBox.critical(
                 self.window, 
@@ -212,7 +214,6 @@ class AnalysisApp:
             self.progress.setVisible(False)
 
     def run_evaluation(self):
-        """Trajectory değerlendirme işlemini başlatır"""
         try:
             self.evaluator.input_path = self.eval_file_input.text()
             self.evaluator.file_index = self.eval_file_index.text()
@@ -224,6 +225,12 @@ class AnalysisApp:
             QApplication.processEvents()
             
             result = self.evaluator.run_evaluation()
+
+            if result['success']:
+                df = self.evaluator.load_data()
+                results = self.evaluator.evaluate_trajectory(df)
+                report_text = self.evaluator._generate_report_text(results)
+                self.results_text.setPlainText(report_text)
             
             self.progress.setVisible(False)
             
