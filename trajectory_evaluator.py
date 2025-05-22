@@ -5,252 +5,304 @@ import os
 import argparse
 import numpy as np
 import pandas as pd
+from io import StringIO
+from pathlib import Path
+from datetime import datetime
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
-from pathlib import Path
-from io import StringIO
 from matplotlib.backends.backend_pdf import PdfPages
 
-# ==== Configuration ====
-data_dir = Path.home() / "data"
-default_file_index = 1
 
-# Argument Parsing
-parser = argparse.ArgumentParser(description="Evaluate trajectory accuracy between PX4 and VIO.")
-parser.add_argument("index", nargs="?", default=str(default_file_index),
-                    help="Index of the pose CSV file (e.g., 1 for pose_1.csv)")
-args = parser.parse_args()
-csv_file = data_dir / f"pose_{args.index}.csv"
-csv_output_dir = data_dir / "output" / "report"
-os.makedirs(csv_output_dir, exist_ok=True)
+class TrajectoryEvaluator:
+    def __init__(self, data_dir=Path.home() / "data", default_file_index=1):
+        self.data_dir = data_dir
+        self.default_file_index = default_file_index
+        self.today_str = datetime.today().strftime("%Y_%m_%d")
+        
+        # Configuration
+        self.time_column = "timestamp"
+        self.px4_prefix = "PX4 Pose"
+        self.vio_prefix = "VIO Pose"
+        self.px4_vel_prefix = "PX4 Vel"
+        self.vio_vel_prefix = "VIO Vel"
+        self.rpe_delta = 1  # Δt = 1 index (e.g., 100ms if 10Hz)
+        self.period = 0.1  # 100ms
+        
+        # Initialize attributes that will be set later
+        self.df = None
+        self.px4_xyz = None
+        self.vio_xyz = None
+        self.vio_aligned = None
+        self.errors = None
+        self.rpe = None
+        self.output_dir = None
+        self.result_output_file = None
+        self.pdf_filename = None
 
-csv_output_file = csv_output_dir / f"pose_{args.index}.csv"
+    def parse_arguments(self):
+        parser = argparse.ArgumentParser(description="Evaluate trajectory accuracy between PX4 and VIO.")
+        parser.add_argument("index", nargs="?", default=str(self.default_file_index),
+                            help="Index of the pose CSV file (e.g., 1 for pose_1.csv)")
+        args = parser.parse_args()
+        return args
 
-time_column = "timestamp"
-px4_prefix = "PX4 Pose"
-vio_prefix = "VIO Pose"
-px4_vel_prefix = "PX4 Vel"
-vio_vel_prefix = "VIO Vel"
-rpe_delta = 1  # Δt = 1 index (e.g., 100ms if 10Hz)
-period = 0.1 # 100ms
+    def setup_paths(self, file_index):
+        csv_file = self.data_dir / f"pose_{file_index}.csv"
+        
+        self.output_dir = os.path.join(self.data_dir, "output", self.today_str, "Reports")
+        os.makedirs(self.output_dir, exist_ok=True)
+        
+        self.result_output_file = os.path.join(self.output_dir, f"pose_{file_index}.csv")
+        self.pdf_filename = str(self.result_output_file).replace(".csv", "_report.pdf")
+        return csv_file
 
-# ==== Load CSV ====
-with open(csv_file, "r") as f:
-    lines = f.readlines()[:-1]
+    def load_data(self, csv_file):
+        with open(csv_file, "r") as f:
+            lines = f.readlines()[:-1]
 
-df = pd.read_csv(StringIO("".join(lines)))
+        self.df = pd.read_csv(StringIO("".join(lines)))
 
-# ==== Validate Columns ====
-required_columns = [f"{px4_prefix} X", f"{px4_prefix} Y", f"{px4_prefix} Z",
-                    f"{vio_prefix} X", f"{vio_prefix} Y", f"{vio_prefix} Z"]
-missing = [col for col in required_columns if col not in df.columns]
-if missing:
-    print(f"Missing columns in CSV: {missing}")
-    sys.exit(1)
+    def validate_columns(self):
+        required_columns = [
+            f"{self.px4_prefix} X", f"{self.px4_prefix} Y", f"{self.px4_prefix} Z",
+            f"{self.vio_prefix} X", f"{self.vio_prefix} Y", f"{self.vio_prefix} Z"
+        ]
+        missing = [col for col in required_columns if col not in self.df.columns]
+        if missing:
+            print(f"Missing columns in CSV: {missing}")
+            sys.exit(1)
 
-# ==== Extract and Align ====
-px4_xyz = df[[f"{px4_prefix} X", f"{px4_prefix} Y", f"{px4_prefix} Z"]].values
-vio_xyz = df[[f"{vio_prefix} X", f"{vio_prefix} Y", f"{vio_prefix} Z"]].values
+    def extract_trajectories(self):
+        self.px4_xyz = self.df[[f"{self.px4_prefix} X", f"{self.px4_prefix} Y", f"{self.px4_prefix} Z"]].values
+        self.vio_xyz = self.df[[f"{self.vio_prefix} X", f"{self.vio_prefix} Y", f"{self.vio_prefix} Z"]].values
 
+    def align_trajectories(self):
+        vio_mean = np.mean(self.vio_xyz, axis=0)
+        gt_mean = np.mean(self.px4_xyz, axis=0)
+        vio_centered = self.vio_xyz - vio_mean
+        gt_centered = self.px4_xyz - gt_mean
 
-
-# ==== Velocity Statistics ====
-required_vel_columns = [f"{px4_vel_prefix} X", f"{px4_vel_prefix} Y", f"{px4_vel_prefix} Z",
-                        f"{vio_vel_prefix} X", f"{vio_vel_prefix} Y", f"{vio_vel_prefix} Z"]
-missing_vel = [col for col in required_vel_columns if col not in df.columns]
-if missing_vel:
-    print(f"Missing velocity columns in CSV: {missing_vel}")
-else:
-    px4_vel = df[[f"{px4_vel_prefix} X", f"{px4_vel_prefix} Y", f"{px4_vel_prefix} Z"]].values
-    vio_vel = df[[f"{vio_vel_prefix} X", f"{vio_vel_prefix} Y", f"{vio_vel_prefix} Z"]].values
-
-    px4_speeds = np.linalg.norm(px4_vel, axis=1)
-    vio_speeds = np.linalg.norm(vio_vel, axis=1)
-
-    mean_px4_speed = np.mean(px4_speeds)
-    max_px4_speed = np.max(px4_speeds)
-    min_px4_speed = np.min(px4_speeds)
-    std_px4_speed = np.std(px4_speeds)
-
-    mean_vio_speed = np.mean(vio_speeds)
-    max_vio_speed = np.max(vio_speeds)
-    min_vio_speed = np.min(vio_speeds)
-    std_vio_speed = np.std(vio_speeds)
-
-
-def align_trajectories(vio, gt):
-    vio_mean = np.mean(vio, axis=0)
-    gt_mean = np.mean(gt, axis=0)
-    vio_centered = vio - vio_mean
-    gt_centered = gt - gt_mean
-
-    H = vio_centered.T @ gt_centered
-    U, _, Vt = np.linalg.svd(H)
-    R_align = Vt.T @ U.T
-
-    if np.linalg.det(R_align) < 0:
-        Vt[-1, :] *= -1
+        H = vio_centered.T @ gt_centered
+        U, _, Vt = np.linalg.svd(H)
         R_align = Vt.T @ U.T
 
-    t_align = gt_mean - R_align @ vio_mean
-    vio_aligned = (R_align @ vio.T).T + t_align
-    return vio_aligned
+        if np.linalg.det(R_align) < 0:
+            Vt[-1, :] *= -1
+            R_align = Vt.T @ U.T
 
-vio_aligned = align_trajectories(vio_xyz, px4_xyz)
+        t_align = gt_mean - R_align @ vio_mean
+        self.vio_aligned = (R_align @ self.vio_xyz.T).T + t_align
 
-# ==== Compute ATE ====
-errors = np.linalg.norm(vio_aligned - px4_xyz, axis=1)
-ate_rmse = np.sqrt(np.mean(errors**2))
-ate_mean = np.mean(errors)
-ate_median = np.median(errors)
-ate_std = np.std(errors)
+    def compute_ate(self):
+        self.errors = np.linalg.norm(self.vio_aligned - self.px4_xyz, axis=1)
+        self.ate_rmse = np.sqrt(np.mean(self.errors**2))
+        self.ate_mean = np.mean(self.errors)
+        self.ate_median = np.median(self.errors)
+        self.ate_std = np.std(self.errors)
 
-# ==== Compute RPE ====
-rpe = []
-for i in range(len(px4_xyz) - rpe_delta):
-    delta_px4 = px4_xyz[i + rpe_delta] - px4_xyz[i]
-    delta_vio = vio_aligned[i + rpe_delta] - vio_aligned[i]
-    rpe.append(np.linalg.norm(delta_px4 - delta_vio))
-rpe = np.array(rpe)
+    def compute_rpe(self):
+        rpe = []
+        for i in range(len(self.px4_xyz) - self.rpe_delta):
+            delta_px4 = self.px4_xyz[i + self.rpe_delta] - self.px4_xyz[i]
+            delta_vio = self.vio_aligned[i + self.rpe_delta] - self.vio_aligned[i]
+            rpe.append(np.linalg.norm(delta_px4 - delta_vio))
+        self.rpe = np.array(rpe)
 
-rpe_rmse = np.sqrt(np.mean(rpe**2))
-rpe_mean = np.mean(rpe)
-rpe_median = np.median(rpe)
-rpe_std = np.std(rpe)
+        self.rpe_rmse = np.sqrt(np.mean(self.rpe**2))
+        self.rpe_mean = np.mean(self.rpe)
+        self.rpe_median = np.median(self.rpe)
+        self.rpe_std = np.std(self.rpe)
 
-# ==== Compute Distance Traveled ====
-px4_distances = np.linalg.norm(np.diff(px4_xyz[:, :2], axis=0), axis=1)
-px4_total_distance = np.sum(px4_distances)
+    def compute_distance_stats(self):
+        # Compute distance traveled
+        self.px4_distances = np.linalg.norm(np.diff(self.px4_xyz[:, :2], axis=0), axis=1)
+        self.px4_total_distance = np.sum(self.px4_distances)
 
-vio_distances = np.linalg.norm(np.diff(vio_xyz[:, :2], axis=0), axis=1)
-vio_total_distance = np.sum(vio_distances)
+        self.vio_distances = np.linalg.norm(np.diff(self.vio_xyz[:, :2], axis=0), axis=1)
+        self.vio_total_distance = np.sum(self.vio_distances)
 
-total_distance_difference = np.abs(px4_total_distance - vio_total_distance)
-total_distance_difference_range = total_distance_difference / px4_total_distance * 100
+        self.total_distance_difference = np.abs(self.px4_total_distance - self.vio_total_distance)
+        self.total_distance_difference_range = self.total_distance_difference / self.px4_total_distance * 100
 
-max_px4_height = px4_xyz[:, 2].max()
-min_px4_height = px4_xyz[:, 2].min()
-mean_px4_height = px4_xyz[:, 2].mean()
+        # Compute height statistics
+        self.max_px4_height = self.px4_xyz[:, 2].max()
+        self.min_px4_height = self.px4_xyz[:, 2].min()
+        self.mean_px4_height = self.px4_xyz[:, 2].mean()
 
-max_vio_height = vio_xyz[:, 2].max()
-min_vio_height = vio_xyz[:, 2].min()
-mean_vio_height = vio_xyz[:, 2].mean()
+        self.max_vio_height = self.vio_xyz[:, 2].max()
+        self.min_vio_height = self.vio_xyz[:, 2].min()
+        self.mean_vio_height = self.vio_xyz[:, 2].mean()
 
-rows_size = df.shape[0]
-time_consumption = rows_size * period
-# ==== Display Console Summary ====
-print("\n========= SUMMARY =========\n")
-print(f"Time consumption: {time_consumption:.2f} seconds\n")
+        # Time consumption
+        self.rows_size = self.df.shape[0]
+        self.time_consumption = self.rows_size * self.period
 
-print("\n== ATE (Absolute Trajectory Error) ==")
-print(f"RMSE   : {ate_rmse:.4f} m")
-print(f"MEAN   : {ate_mean:.4f} m")
-print(f"MEDIAN : {ate_median:.4f} m")
-print(f"STD    : {ate_std:.4f} m")
+    def compute_velocity_stats(self):
+        required_vel_columns = [
+            f"{self.px4_vel_prefix} X", f"{self.px4_vel_prefix} Y", f"{self.px4_vel_prefix} Z",
+            f"{self.vio_vel_prefix} X", f"{self.vio_vel_prefix} Y", f"{self.vio_vel_prefix} Z"
+        ]
+        self.missing_vel = [col for col in required_vel_columns if col not in self.df.columns]
+        
+        if self.missing_vel:
+            print(f"Missing velocity columns in CSV: {self.missing_vel}")
+            return False
+        
+        px4_vel = self.df[[f"{self.px4_vel_prefix} X", f"{self.px4_vel_prefix} Y", f"{self.px4_vel_prefix} Z"]].values
+        vio_vel = self.df[[f"{self.vio_vel_prefix} X", f"{self.vio_vel_prefix} Y", f"{self.vio_vel_prefix} Z"]].values
 
-print("\n== RPE (Relative Pose Error, Δt = 100ms) ==")
-print(f"RMSE   : {rpe_rmse:.4f} m")
-print(f"MEAN   : {rpe_mean:.4f} m")
-print(f"MEDIAN : {rpe_median:.4f} m")
-print(f"STD    : {rpe_std:.4f} m")
+        px4_speeds = np.linalg.norm(px4_vel, axis=1)
+        vio_speeds = np.linalg.norm(vio_vel, axis=1)
 
-print("\n== Total Distance Traveled on X-Y Plane ==")
-print(f"PX4 Total Distance: {px4_total_distance:.2f} meters")
-print(f"VIO Total Distance: {vio_total_distance:.2f} meters")
-print(f"Total Distance Difference: {total_distance_difference:.2f} meters")
-print(f"Total Distance Difference Range: {total_distance_difference_range:.2f} %\n")
+        self.mean_px4_speed = np.mean(px4_speeds)
+        self.max_px4_speed = np.max(px4_speeds)
+        self.min_px4_speed = np.min(px4_speeds)
+        self.std_px4_speed = np.std(px4_speeds)
 
-print(f"Max height of PX4 estimate is {max_px4_height}")
-print(f"Min height of PX4 estimate is {min_px4_height}")
-print(f"Mean height of PX4 estimate is {mean_px4_height}\n")
+        self.mean_vio_speed = np.mean(vio_speeds)
+        self.max_vio_speed = np.max(vio_speeds)
+        self.min_vio_speed = np.min(vio_speeds)
+        self.std_vio_speed = np.std(vio_speeds)
+        
+        return True
 
-print(f"Max height of VIO estimate is {max_vio_height}")
-print(f"Min height of VIO estimate is {min_vio_height}")
-print(f"Mean height of VIO estimate is {mean_vio_height}\n")
+    def generate_report_text(self):
+        text = f"""
+        Time consumption: {self.time_consumption:.2f} seconds
 
-if not missing_vel:
-    print("== PX4 Velocity Statistics ==")
-    print(f"Mean speed: {mean_px4_speed:.2f} m/s")
-    print(f"Max speed : {max_px4_speed:.2f} m/s")
-    print(f"Min speed : {min_px4_speed:.2f} m/s")
-    print(f"STD speed : {std_px4_speed:.2f} m/s\n")
+        == ATE (Absolute Trajectory Error) ==
+        RMSE   : {self.ate_rmse:.4f} m
+        MEAN   : {self.ate_mean:.4f} m
+        MEDIAN : {self.ate_median:.4f} m
+        STD    : {self.ate_std:.4f} m
 
-    print("== VIO Velocity Statistics ==")
-    print(f"Mean speed: {mean_vio_speed:.2f} m/s")
-    print(f"Max speed : {max_vio_speed:.2f} m/s")
-    print(f"Min speed : {min_vio_speed:.2f} m/s")
-    print(f"STD speed : {std_vio_speed:.2f} m/s\n")
+        == RPE (Relative Pose Error, Δt = 100ms) ==
+        RMSE   : {self.rpe_rmse:.4f} m
+        MEAN   : {self.rpe_mean:.4f} m
+        MEDIAN : {self.rpe_median:.4f} m
+        STD    : {self.rpe_std:.4f} m
 
-# ==== Save Report as PDF ====
-pdf_filename = str(csv_output_file).replace(".csv", "_report.pdf")
-with PdfPages(pdf_filename) as pdf:
-    # Trajectory Plot
-    plt.figure(figsize=(10, 8))
-    plt.plot(px4_xyz[:, 0], px4_xyz[:, 1], label="PX4 (Ground Truth)", linewidth=2)
-    plt.plot(vio_aligned[:, 0], vio_aligned[:, 1], label="VIO (Estimated)", linewidth=2)
-    plt.xlabel("X [m]")
-    plt.ylabel("Y [m]")
-    plt.title("2D Trajectory Comparison (X-Y Plane)")
-    plt.legend()
-    plt.grid(True)
-    plt.axis("equal")
-    plt.tight_layout()
-    pdf.savefig()
-    plt.close()
+        == Total Distance Traveled on X-Y Plane ==
+        PX4 Total Distance: {self.px4_total_distance:.2f} meters
+        VIO Total Distance: {self.vio_total_distance:.2f} meters
 
-    # Summary Text
-    fig_text = plt.figure(figsize=(8.5, 11))
-    text = f"""
-    Time consumption: {time_consumption:.2f} seconds
+        Total Distance Difference: {self.total_distance_difference:.2f} meters
+        Total Distance Difference Range: {self.total_distance_difference_range:.2f} %
 
-    == ATE (Absolute Trajectory Error) ==
-    RMSE   : {ate_rmse:.4f} m
-    MEAN   : {ate_mean:.4f} m
-    MEDIAN : {ate_median:.4f} m
-    STD    : {ate_std:.4f} m
+        == PX4 Height Statistics ==
+        Max height of PX4 estimate is {self.max_px4_height:.2f}
+        Min height of PX4 estimate is {self.min_px4_height:.2f}
+        Mean height of PX4 estimate is {self.mean_px4_height:.2f}
 
-    == RPE (Relative Pose Error, Δt = 100ms) ==
-    RMSE   : {rpe_rmse:.4f} m
-    MEAN   : {rpe_mean:.4f} m
-    MEDIAN : {rpe_median:.4f} m
-    STD    : {rpe_std:.4f} m
+        == VIO Height Statistics ==
+        Max height of  VIO estimate is {self.max_vio_height:.2f}
+        Min height of  VIO estimate is {self.min_vio_height:.2f}
+        Mean height of VIO estimate is {self.mean_vio_height:.2f}
+        """
 
-    == Total Distance Traveled on X-Y Plane ==
-    PX4 Total Distance: {px4_total_distance:.2f} meters
-    VIO Total Distance: {vio_total_distance:.2f} meters
+        if not self.missing_vel:
+            text += f"""\n
+        == PX4 Velocity Statistics ==
+        Mean speed: {self.mean_px4_speed:.2f} m/s
+        Max speed : {self.max_px4_speed:.2f} m/s
+        Min speed : {self.min_px4_speed:.2f} m/s
+        STD speed : {self.std_px4_speed:.2f} m/s
 
-    Total Distance Difference: {total_distance_difference:.2f} meters
-    Total Distance Difference Range: {total_distance_difference_range:.2f} %
+        == VIO Velocity Statistics ==
+        Mean speed: {self.mean_vio_speed:.2f} m/s
+        Max speed : {self.max_vio_speed:.2f} m/s
+        Min speed : {self.min_vio_speed:.2f} m/s
+        STD speed : {self.std_vio_speed:.2f} m/s
+        """
+        
+        return text
 
-    == PX4 Height Statistics ==
-    Max height of PX4 estimate is {max_px4_height:.2f}
-    Min height of PX4 estimate is {min_px4_height:.2f}
-    Mean height of PX4 estimate is {mean_px4_height:.2f}
+    def print_summary(self):
+        print("\n========= SUMMARY =========\n")
+        print(f"Time consumption: {self.time_consumption:.2f} seconds\n")
 
-    == VIO Height Statistics ==
-    Max height of  VIO estimate is {max_vio_height:.2f}
-    Min height of  VIO estimate is {min_vio_height:.2f}
-    Mean height of VIO estimate is {mean_vio_height:.2f}
-    """
+        print("\n== ATE (Absolute Trajectory Error) ==")
+        print(f"RMSE   : {self.ate_rmse:.4f} m")
+        print(f"MEAN   : {self.ate_mean:.4f} m")
+        print(f"MEDIAN : {self.ate_median:.4f} m")
+        print(f"STD    : {self.ate_std:.4f} m")
 
-    if not missing_vel:
-        text += f"""\n
-    == PX4 Velocity Statistics ==
-    Mean speed: {mean_px4_speed:.2f} m/s
-    Max speed : {max_px4_speed:.2f} m/s
-    Min speed : {min_px4_speed:.2f} m/s
-    STD speed : {std_px4_speed:.2f} m/s
+        print("\n== RPE (Relative Pose Error, Δt = 100ms) ==")
+        print(f"RMSE   : {self.rpe_rmse:.4f} m")
+        print(f"MEAN   : {self.rpe_mean:.4f} m")
+        print(f"MEDIAN : {self.rpe_median:.4f} m")
+        print(f"STD    : {self.rpe_std:.4f} m")
 
-    == VIO Velocity Statistics ==
-    Mean speed: {mean_vio_speed:.2f} m/s
-    Max speed : {max_vio_speed:.2f} m/s
-    Min speed : {min_vio_speed:.2f} m/s
-    STD speed : {std_vio_speed:.2f} m/s
-    """
+        print("\n== Total Distance Traveled on X-Y Plane ==")
+        print(f"PX4 Total Distance: {self.px4_total_distance:.2f} meters")
+        print(f"VIO Total Distance: {self.vio_total_distance:.2f} meters")
+        print(f"Total Distance Difference: {self.total_distance_difference:.2f} meters")
+        print(f"Total Distance Difference Range: {self.total_distance_difference_range:.2f} %\n")
 
-    plt.axis('off')
-    plt.text(0.01, 0.99, text, va='top', ha='left', fontsize=12, family='monospace')
-    pdf.savefig(fig_text)
-    plt.close()
+        print(f"Max height of PX4 estimate is {self.max_px4_height:.2f}")
+        print(f"Min height of PX4 estimate is {self.min_px4_height:.2f}")
+        print(f"Mean height of PX4 estimate is {self.mean_px4_height:.2f}\n")
 
-print(f"PDF report saved as: {pdf_filename}")
+        print(f"Max height of VIO estimate is {self.max_vio_height:.2f}")
+        print(f"Min height of VIO estimate is {self.min_vio_height:.2f}")
+        print(f"Mean height of VIO estimate is {self.mean_vio_height:.2f}\n")
+
+        if not self.missing_vel:
+            print("== PX4 Velocity Statistics ==")
+            print(f"Mean speed: {self.mean_px4_speed:.2f} m/s")
+            print(f"Max speed : {self.max_px4_speed:.2f} m/s")
+            print(f"Min speed : {self.min_px4_speed:.2f} m/s")
+            print(f"STD speed : {self.std_px4_speed:.2f} m/s\n")
+
+            print("== VIO Velocity Statistics ==")
+            print(f"Mean speed: {self.mean_vio_speed:.2f} m/s")
+            print(f"Max speed : {self.max_vio_speed:.2f} m/s")
+            print(f"Min speed : {self.min_vio_speed:.2f} m/s")
+            print(f"STD speed : {self.std_vio_speed:.2f} m/s\n")
+
+    def generate_pdf_report(self):
+        with PdfPages(self.pdf_filename) as pdf:
+            # Trajectory Plot
+            plt.figure(figsize=(10, 8))
+            plt.plot(self.px4_xyz[:, 0], self.px4_xyz[:, 1], label="PX4 (Ground Truth)", linewidth=2)
+            plt.plot(self.vio_aligned[:, 0], self.vio_aligned[:, 1], label="VIO (Estimated)", linewidth=2)
+            plt.xlabel("X [m]")
+            plt.ylabel("Y [m]")
+            plt.title("2D Trajectory Comparison (X-Y Plane)")
+            plt.legend()
+            plt.grid(True)
+            plt.axis("equal")
+            plt.tight_layout()
+            pdf.savefig()
+            plt.close()
+
+            # Summary Text
+            fig_text = plt.figure(figsize=(8.5, 11))
+            plt.axis('off')
+            plt.text(0.01, 0.99, self.generate_report_text(), va='top', ha='left', fontsize=12, family='monospace')
+            pdf.savefig(fig_text)
+            plt.close()
+
+    def run(self):
+        args = self.parse_arguments()
+        csv_file = self.setup_paths(args.index)
+        
+        self.load_data(csv_file)
+        self.validate_columns()
+        self.extract_trajectories()
+        self.align_trajectories()
+        
+        self.compute_ate()
+        self.compute_rpe()
+        self.compute_distance_stats()
+        has_velocity = self.compute_velocity_stats()
+        
+        self.print_summary()
+        self.generate_pdf_report()
+        
+        print(f"PDF report saved as: {self.pdf_filename}")
+
+
+if __name__ == "__main__":
+    evaluator = TrajectoryEvaluator()
+    evaluator.run()
