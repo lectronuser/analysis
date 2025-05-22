@@ -2,7 +2,7 @@
 import os
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QComboBox, QFileDialog,
-                             QMessageBox, QProgressBar, QTabWidget, QGroupBox)
+                             QMessageBox, QProgressBar, QTabWidget, QGroupBox, QListWidget)
 from PyQt5.QtCore import Qt
 from analysis import CSVVisualizer
 from trajectory_evaluator import TrajectoryEvaluator
@@ -14,29 +14,24 @@ class AnalysisApp:
         self.visualizer = CSVVisualizer()
         self.evaluator = TrajectoryEvaluator()
         self.setup_ui()
-        self.current_mode = "visualization"  # or "evaluation"
+        self.current_mode = "visualization"  
 
     def setup_ui(self):
-        """Arayüzü ve sekmeleri oluşturur"""
         central_widget = QWidget()
         layout = QVBoxLayout()
         
-        # Sekmeler
         self.tabs = QTabWidget()
         
-        # 1. Görselleştirme Sekmesi
         vis_tab = QWidget()
         self.setup_visualization_tab(vis_tab)
         self.tabs.addTab(vis_tab, "CSV Görselleştirme")
         
-        # 2. Trajectory Değerlendirme Sekmesi
         eval_tab = QWidget()
         self.setup_evaluation_tab(eval_tab)
         self.tabs.addTab(eval_tab, "Trajectory Değerlendirme")
         
         layout.addWidget(self.tabs)
         
-        # Ortak İlerleme Çubuğu
         self.progress = QProgressBar()
         self.progress.setVisible(False)
         layout.addWidget(self.progress)
@@ -44,13 +39,11 @@ class AnalysisApp:
         central_widget.setLayout(layout)
         self.window.setCentralWidget(central_widget)
         self.window.setWindowTitle("Veri Analiz Aracı")
-        self.window.resize(700, 400)
+        self.window.resize(720, 480)
 
     def setup_visualization_tab(self, tab):
-        """Görselleştirme sekmesi arayüzü"""
         layout = QVBoxLayout()
         
-        # Dosya Seçim
         file_group = QGroupBox("Veri Kaynağı")
         file_layout = QHBoxLayout()
         
@@ -64,7 +57,20 @@ class AnalysisApp:
         file_group.setLayout(file_layout)
         layout.addWidget(file_group)
         
-        # Parametreler
+        self.file_list_group = QGroupBox("Seçilecek Dosyalar")
+        file_list_layout = QVBoxLayout()
+        
+        self.file_list_widget = QListWidget()
+        self.file_list_widget.setSelectionMode(QListWidget.MultiSelection)
+        file_list_layout.addWidget(self.file_list_widget)
+        
+        refresh_btn = QPushButton("Listeyi Yenile")
+        refresh_btn.clicked.connect(self.refresh_file_list)
+        file_list_layout.addWidget(refresh_btn)
+        
+        self.file_list_group.setLayout(file_list_layout)
+        layout.addWidget(self.file_list_group)
+        
         param_group = QGroupBox("Görselleştirme Parametreleri")
         param_layout = QHBoxLayout()
         
@@ -80,18 +86,27 @@ class AnalysisApp:
         param_group.setLayout(param_layout)
         layout.addWidget(param_group)
         
-        # Buton
         vis_run_btn = QPushButton("Görselleştirmeyi Başlat")
         vis_run_btn.clicked.connect(self.run_visualization)
         layout.addWidget(vis_run_btn)
         
         tab.setLayout(layout)
+        self.refresh_file_list()  
+
+    def refresh_file_list(self):
+        self.file_list_widget.clear()
+        path = self.vis_file_input.text()
+        
+        if os.path.isdir(path):
+            csv_files = [f for f in os.listdir(path) if f.endswith('.csv')]
+            for file in sorted(csv_files):
+                self.file_list_widget.addItem(file)
+        elif os.path.isfile(path) and path.endswith('.csv'):
+            self.file_list_widget.addItem(os.path.basename(path))
 
     def setup_evaluation_tab(self, tab):
-        """Değerlendirme sekmesi arayüzü"""
         layout = QVBoxLayout()
         
-        # Dosya Seçim
         file_group = QGroupBox("Veri Kaynağı")
         file_layout = QHBoxLayout()
         
@@ -105,25 +120,21 @@ class AnalysisApp:
         file_group.setLayout(file_layout)
         layout.addWidget(file_group)
         
-        # Parametreler
         param_group = QGroupBox("Değerlendirme Parametreleri")
         param_layout = QVBoxLayout()
         
-        # File index
         h_layout = QHBoxLayout()
         h_layout.addWidget(QLabel("Dosya Numarası:"))
         self.eval_file_index = QLineEdit("1")
         h_layout.addWidget(self.eval_file_index)
         param_layout.addLayout(h_layout)
         
-        # Sample period
         h_layout = QHBoxLayout()
         h_layout.addWidget(QLabel("Örnekleme Periyodu (s):"))
         self.eval_period = QLineEdit("0.1")
         h_layout.addWidget(self.eval_period)
         param_layout.addLayout(h_layout)
         
-        # RPE delta
         h_layout = QHBoxLayout()
         h_layout.addWidget(QLabel("RPE Delta (örnek sayısı):"))
         self.eval_rpe_delta = QLineEdit("1")
@@ -133,7 +144,6 @@ class AnalysisApp:
         param_group.setLayout(param_layout)
         layout.addWidget(param_group)
         
-        # Buton
         eval_run_btn = QPushButton("Değerlendirmeyi Başlat")
         eval_run_btn.clicked.connect(self.run_evaluation)
         layout.addWidget(eval_run_btn)
@@ -141,7 +151,6 @@ class AnalysisApp:
         tab.setLayout(layout)
 
     def browse_files(self, target_input, is_dir=False):
-        """Dosya veya klasör seçim diyaloğu"""
         if is_dir:
             path = QFileDialog.getExistingDirectory(
                 self.window, 
@@ -160,36 +169,37 @@ class AnalysisApp:
             target_input.setText(path)
 
     def run_visualization(self):
-        """Görselleştirme işlemini başlatır"""
         try:
-            # Parametreleri ayarla
             self.visualizer.input_path = self.vis_file_input.text()
             self.visualizer.output_format = self.vis_format_combo.currentText()
             
             dim_map = {"None": None, "2D": 2, "3D": 3}
             self.visualizer.show_dimension = dim_map[self.vis_dim_combo.currentText()]
             
-            # İlerleme çubuğunu göster
+            selected_files = [item.text() for item in self.file_list_widget.selectedItems()]
+            if not selected_files:  
+                selected_files = [self.file_list_widget.item(i).text() 
+                                for i in range(self.file_list_widget.count())]
+            
             self.progress.setVisible(True)
-            self.progress.setRange(0, 0)  # Belirsiz mod
+            self.progress.setRange(0, len(selected_files))
             
-            # İşlemi başlat
-            QApplication.processEvents()
-            results = self.visualizer.process_files()
+            results = {'files': []}
             
-            # Sonuçları göster
+            for i, filename in enumerate(selected_files):
+                QApplication.processEvents()
+                self.progress.setValue(i + 1)
+                
+                full_path = os.path.join(self.visualizer.input_path, filename)
+                file_result = self.visualizer._process_single_file(full_path)
+                results['files'].append(file_result)
+            
             self.progress.setVisible(False)
             
             msg = QMessageBox()
-            if 'error' in results:
-                msg.setIcon(QMessageBox.Critical)
-                msg.setText("Hata oluştu!")
-                msg.setInformativeText(results['error'])
-            else:
-                msg.setIcon(QMessageBox.Information)
-                output_loc = results.get('output_file', 'ekranda gösterildi')
-                msg.setText(f"Görselleştirme tamamlandı!\nÇıktı: {output_loc}")
-            
+            msg.setIcon(QMessageBox.Information)
+            output_loc = self.visualizer._output_file if self.visualizer._output_file else 'ekranda gösterildi'
+            msg.setText(f"Görselleştirme tamamlandı!\nÇıktı: {output_loc}")
             msg.exec_()
             
         except Exception as e:
@@ -204,21 +214,17 @@ class AnalysisApp:
     def run_evaluation(self):
         """Trajectory değerlendirme işlemini başlatır"""
         try:
-            # Parametreleri ayarla
             self.evaluator.input_path = self.eval_file_input.text()
             self.evaluator.file_index = self.eval_file_index.text()
             self.evaluator.period = float(self.eval_period.text())
             self.evaluator.rpe_delta = int(self.eval_rpe_delta.text())
             
-            # İlerleme çubuğunu göster
             self.progress.setVisible(True)
             self.progress.setRange(0, 0)
             QApplication.processEvents()
             
-            # İşlemi başlat
             result = self.evaluator.run_evaluation()
             
-            # Sonuçları göster
             self.progress.setVisible(False)
             
             msg = QMessageBox()
@@ -249,7 +255,6 @@ class AnalysisApp:
             self.progress.setVisible(False)
 
     def run(self):
-        """Uygulamayı başlatır"""
         self.window.show()
         self.app.exec_()
 
