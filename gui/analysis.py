@@ -16,7 +16,7 @@ class CSVVisualizer:
         self._input_path = os.path.expanduser("~/data")
         self._output_format = 'screen'
         self._show_dimension = None
-        self.today_str = datetime.today().strftime("%d_%m_%Y")
+        self.today_str = datetime.today().strftime("%Y_%m_%d")
         
         self.column_groups = {
             '2d_pose': ("PX4 Pose X", "PX4 Pose Y", "VIO Pose X", "VIO Pose Y"),

@@ -165,10 +165,10 @@ class TrajectoryEvaluator:
             'min': np.min(rpe)
         }
 
-        px4_distances = np.linalg.norm(np.diff(px4_xyz[:, :2], axis=1)
+        px4_distances = np.linalg.norm(np.diff(px4_xyz[:, :2], axis=0), axis=1)
         px4_total_distance = np.sum(px4_distances)
 
-        vio_distances = np.linalg.norm(np.diff(vio_xyz[:, :2], axis=1)
+        vio_distances = np.linalg.norm(np.diff(vio_xyz[:, :2], axis=0), axis=1)
         vio_total_distance = np.sum(vio_distances)
 
         distance_stats = {
