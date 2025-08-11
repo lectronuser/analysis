@@ -52,7 +52,7 @@ class TrajectoryEvaluator:
         self.output_dir = os.path.join(self.data_dir, "output", self.today_str, "Reports")
         os.makedirs(self.output_dir, exist_ok=True)
         
-        self.result_output_file = os.path.join(self.output_dir, f"pose_{file_index}.csv")
+        self.result_output_file = os.path.join(self.output_dir, f"{file_index}.csv")
         self.pdf_filename = str(self.result_output_file).replace(".csv", "_report.pdf")
         return csv_file
 
@@ -166,8 +166,25 @@ class TrajectoryEvaluator:
         
         return True
 
-    def generate_report_text(self):
+    def get_info(self):
+        dev_model = input("Device Model: ")
+        mission_input = input("Mission: ")
+        mission_output = input("Output: ")
+        mission_explanation = input("Explanation: ").replace("\\n", "\n")
+
         text = f"""
+        Device Model: {dev_model},
+        Mission:  {mission_input},
+        Output:  {mission_output},
+        Explanation: {mission_explanation}
+        """
+
+        return text
+
+    def generate_report_text(self):
+        text= self.get_info()
+
+        text += f"""
         Time consumption: {self.time_consumption:.2f} seconds
 
         == ATE (Absolute Trajectory Error) ==
@@ -214,7 +231,7 @@ class TrajectoryEvaluator:
         Min speed : {self.min_vio_speed:.2f} m/s
         STD speed : {self.std_vio_speed:.2f} m/s
         """
-        
+
         return text
 
     def print_summary(self):
