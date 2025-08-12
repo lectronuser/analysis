@@ -49,11 +49,17 @@ class TrajectoryEvaluator:
     def setup_paths(self, file_index):
         csv_file = self.data_dir / f"pose_{file_index}.csv"
         
-        self.output_dir = os.path.join(self.data_dir, "output", self.today_str, "Reports")
+        # self.output_dir = os.path.join(self.data_dir, "output", self.today_str, "Reports")
+        self.output_dir = os.path.join(self.data_dir, "output", "2025_08_11", "Reports")
         os.makedirs(self.output_dir, exist_ok=True)
         
         self.result_output_file = os.path.join(self.output_dir, f"{file_index}.csv")
         self.pdf_filename = str(self.result_output_file).replace(".csv", "_report.pdf")
+
+        index = input("Please enter the number of this test: ")
+        if(index.__len__() != 0):
+            self.pdf_filename = self.output_dir + "/" + index + "_report.pdf"
+
         return csv_file
 
     def load_data(self, csv_file):
@@ -173,9 +179,9 @@ class TrajectoryEvaluator:
         mission_explanation = input("Explanation: ").replace("\\n", "\n")
 
         text = f"""
-        Device Model: {dev_model},
-        Mission:  {mission_input},
-        Output:  {mission_output},
+        Device Model: {dev_model}
+        Mission:  {mission_input}
+        Output:  {mission_output}
         Explanation: {mission_explanation}
         """
 
