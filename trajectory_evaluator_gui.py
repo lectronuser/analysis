@@ -2,7 +2,7 @@ import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
                              QLabel, QLineEdit, QPushButton, QFileDialog, QTextEdit, 
                              QGroupBox, QFormLayout, QMessageBox, QComboBox)
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QSettings
 from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -20,6 +20,9 @@ class TrajectoryEvaluatorGUI(QMainWindow):
         self.setWindowTitle("Trajectory Evaluator")
         self.setGeometry(100, 100, 1200, 800)
         
+        # Initialize settings
+        self.settings = QSettings("TrajectoryEvaluator", "AppSettings")
+        
         # Initialize attributes
         self.df = None
         self.px4_xyz = None
@@ -30,6 +33,8 @@ class TrajectoryEvaluatorGUI(QMainWindow):
         self.output_dir = None
         self.result_output_file = None
         self.pdf_filename = None
+        self.current_csv_path = None
+        self.data_dir = Path.home() / "data"  # Base data directory
         
         # Configuration
         self.time_column = "timestamp"
@@ -108,6 +113,16 @@ class TrajectoryEvaluatorGUI(QMainWindow):
         result_layout.addRow(QLabel("Explanation:"), self.result_explanation_edit)
         result_group.setLayout(result_layout)
         
+        # Report settings
+        report_group = QGroupBox("Report Settings")
+        report_layout = QFormLayout()
+        
+        self.report_name_edit = QLineEdit()
+        self.report_name_edit.setPlaceholderText("Enter report name (without extension)")
+        
+        report_layout.addRow(QLabel("Report Name:"), self.report_name_edit)
+        report_group.setLayout(report_layout)
+        
         # Buttons
         self.evaluate_btn = QPushButton("Evaluate Trajectory")
         self.evaluate_btn.clicked.connect(self.evaluate_trajectory)
@@ -120,6 +135,7 @@ class TrajectoryEvaluatorGUI(QMainWindow):
         left_layout.addWidget(info_group)
         left_layout.addWidget(mission_group)
         left_layout.addWidget(result_group)
+        left_layout.addWidget(report_group)
         left_layout.addWidget(self.evaluate_btn)
         left_layout.addWidget(self.export_btn)
         left_layout.addStretch()
@@ -140,13 +156,24 @@ class TrajectoryEvaluatorGUI(QMainWindow):
         self.setCentralWidget(main_widget)
         
     def browse_file(self):
+        # Get last directory from settings or use data directory
+        last_dir = self.settings.value("last_dir", str(self.data_dir))
+        
         options = QFileDialog.Options()
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Pose CSV File", "", 
+            self, "Select Pose CSV File", last_dir, 
             "CSV Files (*.csv);;All Files (*)", options=options)
         
         if file_path:
             self.file_path_edit.setText(file_path)
+            self.current_csv_path = Path(file_path)
+            # Save directory to settings
+            self.settings.setValue("last_dir", str(self.current_csv_path.parent))
+            
+            # Set default report name based on CSV file name
+            # report_name = self.current_csv_path.stem.replace("pose_", "report_")
+            report_name = self.test_num_edit.text() + "_report"
+            self.report_name_edit.setText(report_name)
             
     def load_data(self, csv_file):
         with open(csv_file, "r") as f:
@@ -298,6 +325,9 @@ class TrajectoryEvaluatorGUI(QMainWindow):
             
             self.plot_trajectory()
             self.export_btn.setEnabled(True)
+
+            report_name = self.test_num_edit.text() + "_report"
+            self.report_name_edit.setText(report_name)
             
             QMessageBox.information(self, "Success", "Trajectory evaluation completed successfully!")
             
@@ -373,31 +403,39 @@ class TrajectoryEvaluatorGUI(QMainWindow):
             QMessageBox.warning(self, "Warning", "Please evaluate a trajectory first.")
             return
             
-        # Get output directory
-        options = QFileDialog.Options()
-        save_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Report", "", 
-            "PDF Files (*.pdf);;All Files (*)", options=options)
-            
-        if not save_path:
+        # Get report name
+        report_name = self.report_name_edit.text().strip()
+        if not report_name:
+            QMessageBox.warning(self, "Warning", "Please enter a report name.")
             return
             
+        # Create output directory structure
+        today_str = datetime.today().strftime("%Y_%m_%d")
+        output_dir = self.data_dir / "output" / today_str / "Reports"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        save_path = output_dir / f"{report_name}.pdf"
+        
         # Create PDF report
         from matplotlib.backends.backend_pdf import PdfPages
         
-        with PdfPages(save_path) as pdf:
-            # Plot figure
-            self.figure.savefig(pdf, format='pdf', bbox_inches='tight')
+        try:
+            with PdfPages(str(save_path)) as pdf:
+                # Plot figure
+                self.figure.savefig(pdf, format='pdf', bbox_inches='tight')
+                
+                # Text page
+                fig_text = plt.figure(figsize=(8.5, 11))
+                plt.axis('off')
+                plt.text(0.01, 0.99, self.generate_report_text(), 
+                        va='top', ha='left', fontsize=10, family='monospace')
+                pdf.savefig(fig_text, bbox_inches='tight')
+                plt.close(fig_text)
+                
+            QMessageBox.information(self, "Success", f"Report saved to:\n{save_path}")
             
-            # Text page
-            fig_text = plt.figure(figsize=(8.5, 11))
-            plt.axis('off')
-            plt.text(0.01, 0.99, self.generate_report_text(), 
-                    va='top', ha='left', fontsize=10, family='monospace')
-            pdf.savefig(fig_text, bbox_inches='tight')
-            plt.close(fig_text)
-            
-        QMessageBox.information(self, "Success", f"Report saved to:\n{save_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save report: {str(e)}")
 
 
 def main():
