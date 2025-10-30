@@ -635,14 +635,99 @@ class TrajectoryEvaluatorGUI(QMainWindow):
         
         try:
             with PdfPages(str(save_path)) as pdf:
-                # Plot figure
-                self.figure.savefig(pdf, format='pdf', bbox_inches='tight')
-                
-                # Text page
+                # --- Page 1: Trajectory plot ---
+                fig_traj = plt.figure(figsize=(10, 6))
+                ax = fig_traj.add_subplot(111)
+                # plot raw trajectories
+                ax.plot(self.px4_xyz[:, 0], self.px4_xyz[:, 1], label="PX4 (Ground Truth)", linewidth=2)
+                ax.plot(self.vio_xyz[:, 0], self.vio_xyz[:, 1], label="VIO (Raw)", linewidth=2)
+                ax.plot(self.fus_xyz[:, 0], self.fus_xyz[:, 1], label="FUS (Raw)", linewidth=2, color='purple')
+
+                # start/end markers
+                if self.px4_xyz is not None and len(self.px4_xyz) > 0:
+                    px4_start = self.px4_xyz[0, :2]
+                    px4_end = self.px4_xyz[-1, :2]
+                    ax.scatter(px4_start[0], px4_start[1], c='green', marker='o', s=80, zorder=5, label='PX4 Start')
+                    ax.scatter(px4_end[0], px4_end[1], c='darkgreen', marker='X', s=80, zorder=5, label='PX4 End')
+
+                if self.vio_xyz is not None and len(self.vio_xyz) > 0:
+                    vio_start = self.vio_xyz[0, :2]
+                    vio_end = self.vio_xyz[-1, :2]
+                    ax.scatter(vio_start[0], vio_start[1], c='orange', marker='o', s=80, zorder=5, label='VIO Start')
+                    ax.scatter(vio_end[0], vio_end[1], c='red', marker='X', s=80, zorder=5, label='VIO End')
+
+                if self.fus_xyz is not None and len(self.fus_xyz) > 0:
+                    fus_start = self.fus_xyz[0, :2]
+                    fus_end = self.fus_xyz[-1, :2]
+                    ax.scatter(fus_start[0], fus_start[1], c='purple', marker='o', s=80, zorder=5, label='FUS Start')
+                    ax.scatter(fus_end[0], fus_end[1], c='darkviolet', marker='X', s=80, zorder=5, label='FUS End')
+
+                # ideal trajectory (if provided)
+                try:
+                    dist_text = self.distance_edit.text().strip()
+                    yaw_text = self.yaw_edit.text().strip()
+                    if dist_text and yaw_text:
+                        dist_val = float(dist_text)
+                        yaw_deg = float(yaw_text)
+                        yaw_rad = np.deg2rad(yaw_deg)
+                        ideal_rel_x = dist_val * np.cos(yaw_rad)
+                        ideal_rel_y = dist_val * np.sin(yaw_rad)
+                        if self.px4_xyz is not None and len(self.px4_xyz) > 0:
+                            origin = self.px4_xyz[0, :2]
+                        else:
+                            origin = np.array([0.0, 0.0])
+                        ideal_abs_x = origin[0] + ideal_rel_x
+                        ideal_abs_y = origin[1] + ideal_rel_y
+                        ax.plot([origin[0], ideal_abs_x], [origin[1], ideal_abs_y], linestyle='--', color='blue', linewidth=2, label='Ideal Trajectory')
+                        ax.scatter(ideal_abs_x, ideal_abs_y, c='blue', marker='^', s=100, zorder=6, label='Ideal Point')
+                except ValueError:
+                    pass
+
+                ax.set_xlabel("X [m]")
+                ax.set_ylabel("Y [m]")
+                ax.set_title("2D Trajectory Comparison (X-Y Plane)")
+                ax.legend()
+                ax.grid(True)
+                ax.axis('equal')
+                pdf.savefig(fig_traj, bbox_inches='tight')
+                plt.close(fig_traj)
+
+                # --- Page 2: Velocity plot ---
+                fig_vel = plt.figure(figsize=(10, 4))
+                axv = fig_vel.add_subplot(111)
+                timestamps = np.arange(len(self.df)) * self.period
+                plotted = False
+                px4_cols = [f"{self.px4_vel_prefix} X", f"{self.px4_vel_prefix} Y", f"{self.px4_vel_prefix} Z"]
+                if all(col in self.df.columns for col in px4_cols):
+                    px4_vel = np.linalg.norm(self.df[px4_cols].values, axis=1)
+                    axv.plot(timestamps, px4_vel, label='PX4 Velocity', linewidth=2)
+                    plotted = True
+
+                vio_cols = [f"{self.vio_vel_prefix} X", f"{self.vio_vel_prefix} Y", f"{self.vio_vel_prefix} Z"]
+                if all(col in self.df.columns for col in vio_cols):
+                    vio_vel = np.linalg.norm(self.df[vio_cols].values, axis=1)
+                    axv.plot(timestamps, vio_vel, label='VIO Velocity', linewidth=2)
+                    plotted = True
+
+                fus_cols = [f"{self.fus_vel_prefix} X", f"{self.fus_vel_prefix} Y", f"{self.fus_vel_prefix} Z"]
+                if all(col in self.df.columns for col in fus_cols):
+                    fus_vel = np.linalg.norm(self.df[fus_cols].values, axis=1)
+                    axv.plot(timestamps, fus_vel, label='FUS Velocity', linewidth=2, color='purple')
+                    plotted = True
+
+                if plotted:
+                    axv.set_xlabel('Time [s]')
+                    axv.set_ylabel('Velocity [m/s]')
+                    axv.set_title('Velocity Comparison')
+                    axv.legend()
+                    axv.grid(True)
+                    pdf.savefig(fig_vel, bbox_inches='tight')
+                plt.close(fig_vel)
+
+                # --- Page 3: Text summary ---
                 fig_text = plt.figure(figsize=(8.5, 11))
                 plt.axis('off')
-                plt.text(0.01, 0.99, self.generate_report_text(), 
-                        va='top', ha='left', fontsize=10, family='monospace')
+                plt.text(0.01, 0.99, self.generate_report_text(), va='top', ha='left', fontsize=10, family='monospace')
                 pdf.savefig(fig_text, bbox_inches='tight')
                 plt.close(fig_text)
                 
