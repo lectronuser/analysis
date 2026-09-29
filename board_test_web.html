@@ -1,0 +1,1398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Board Test</title>
+<style>
+:root {
+  --bg: #0f1115; --surface: #171a21; --surface2: #1f232c; --row-alt: #1a1e26; --border: #2a2f3a;
+  --text: #e6e8eb; --muted: #8b93a1; --accent: #ff8a00; --ok: #22c55e; --warn: #f59e0b; --err: #ef4444; --off: #4b5563;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 13px/1.4 "Inter", "Segoe UI", "Roboto", system-ui, sans-serif; display: flex; flex-direction: column; }
+button, select, input { font: inherit; color: inherit; }
+button { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 14px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { color: var(--off); cursor: default; }
+button.primary { background: var(--accent); color: #111; border: none; font-weight: 700; padding: 7px 18px; min-width: 120px; }
+button.primary:hover { background: #ffa033; }
+button.primary.connected { background: var(--err); color: #fff; }
+select, input[type=text] { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+input[type=text]:focus { outline: none; border-color: var(--accent); }
+select:disabled, input:disabled { color: var(--muted); }
+input[type=checkbox] { accent-color: var(--accent); }
+
+header { background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 10px 18px; flex-wrap: wrap; }
+.dot { color: var(--accent); font-size: 20px; line-height: 1; }
+.app-title { font-size: 16px; font-weight: 700; margin-right: 16px; }
+.nav { background: transparent; border: 1px solid transparent; color: var(--muted); font-weight: 600; }
+.nav:hover { color: var(--text); }
+.nav.active { background: #2a1d0c; color: var(--accent); border-color: #5a3a10; }
+.spacer { flex: 1; }
+.pill { min-width: 150px; text-align: center; border: 1px solid; border-radius: 13px; padding: 4px 12px; font-weight: 700; background: var(--surface2); }
+
+main { flex: 1; overflow: auto; }
+.page { padding: 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.page[hidden] { display: none; }
+.row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.row2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 1000px) { .row3, .row2 { grid-template-columns: minmax(0, 1fr); } }
+
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.card-head { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.card-title { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+.badge { color: var(--accent); border: 1px solid #5a3a10; border-radius: 4px; padding: 1px 6px; font-size: 11px; font-weight: 700; }
+.muted { color: var(--muted); }
+.strong { font-weight: 600; }
+.card-foot { display: flex; align-items: center; gap: 8px; }
+.card-foot .status { flex: 1; color: var(--muted); }
+
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 7px 16px; }
+.kv .k { color: var(--muted); }
+.kv .v { font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+
+.channels { display: grid; grid-template-columns: auto 1fr 48px; gap: 6px 12px; align-items: center; }
+.channels .name { color: var(--muted); }
+.channels .val { font-weight: 600; text-align: right; }
+.bar { height: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.bar > div { height: 100%; background: var(--accent); border-radius: 3px; width: 0; }
+
+.table-wrap { overflow-x: auto; }
+.table-wrap.log { max-height: 320px; overflow-y: auto; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; color: var(--muted); font-weight: 700; padding: 8px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); white-space: nowrap; }
+td { padding: 0 8px; height: 34px; white-space: pre; overflow: hidden; text-overflow: ellipsis; max-width: 520px; }
+td.wrap { white-space: pre-wrap; }
+tbody tr:nth-child(even) { background: var(--row-alt); }
+td.child { padding-left: 28px; color: var(--muted); }
+td.bold { font-weight: 700; }
+td input[type=text] { width: 90px; padding: 3px 6px; }
+
+.form { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; align-items: center; }
+.form label.check { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; }
+.toolbar { display: flex; align-items: center; gap: 8px; }
+.toolbar .info { flex: 1; color: var(--muted); }
+
+footer { background: var(--surface); color: var(--muted); border-top: 1px solid var(--border); padding: 4px 12px; min-height: 26px; }
+.banner { background: #2b1416; border: 1px solid #6b2429; color: #fca5a5; border-radius: 8px; padding: 10px 14px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot">&#9679;</span>
+  <span class="app-title">Board Test</span>
+  <button class="nav active" data-page="monitor">Monitor</button>
+  <button class="nav" data-page="setup">Setup</button>
+  <span class="spacer"></span>
+  <select id="baud" title="Baud rate (ignored by USB ports)"></select>
+  <button id="connect" class="primary">Connect</button>
+  <span id="pill" class="pill"></span>
+</header>
+
+<main>
+  <section id="page-monitor" class="page">
+    <div id="unsupported" class="banner" hidden>
+      This browser has no Web Serial support. Open this file in Chrome or Edge on a desktop computer.
+    </div>
+    <div class="row3">
+      <div class="card">
+        <div class="card-head"><span class="card-title">Board</span></div>
+        <div id="board" class="kv"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">RC Channels</span><span class="spacer"></span><span id="rc-info" class="muted"></span></div>
+        <div id="rc" class="channels"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Motor Outputs</span></div>
+        <div id="servo" class="channels"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Live Data</span><span class="spacer"></span>
+        <span class="param-info muted"></span>
+        <button id="reload-ids">Reload IDs</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Item</th><th>Chip</th><th>Bus</th><th>Address / Port</th><th style="width:100%">Value</th></tr></thead>
+          <tbody id="live"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Messages</span><span class="spacer"></span>
+        <select id="severity">
+          <option value="7">All messages</option>
+          <option value="4">Warnings and errors</option>
+          <option value="3">Errors only</option>
+        </select>
+        <button id="clear-log">Clear</button>
+      </div>
+      <div id="log-wrap" class="table-wrap log">
+        <table>
+          <thead><tr><th>Time</th><th>Severity</th><th style="width:100%">Message</th></tr></thead>
+          <tbody id="log"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="page-setup" class="page" hidden>
+    <div class="toolbar">
+      <span class="param-info info"></span>
+      <button id="read-params">Read Parameters</button>
+      <button id="reboot">Reboot Board</button>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Onboard Hardware</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Item</th><th>Interface</th><th>Status</th><th style="width:100%">Details</th></tr></thead>
+          <tbody id="onboard"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="peripherals" class="row2"></div>
+  </section>
+</main>
+
+<footer id="statusbar">Select a port and connect</footer>
+
+<template id="network-template">
+  <div class="card">
+    <div class="card-head"><span class="card-title">Network</span><span class="badge">Ethernet</span></div>
+    <div class="form">
+      <label class="check"><input type="checkbox" id="net-enable"> Enable networking</label>
+      <label class="check"><input type="checkbox" id="net-dhcp"> Use DHCP</label>
+      <span class="muted">IP address</span><input type="text" id="net-ip" placeholder="192.168.144.14">
+      <span class="muted">Netmask</span><input type="text" id="net-mask" placeholder="255.255.255.0">
+      <span class="muted">Gateway</span><input type="text" id="net-gw" placeholder="192.168.144.1">
+      <span class="muted">MAC address</span><span id="net-mac" class="strong">-</span>
+    </div>
+    <div class="card-foot">
+      <span id="net-status" class="status"></span>
+      <button id="net-reload">Reload</button>
+      <button id="net-apply">Apply</button>
+    </div>
+  </div>
+</template>
+
+<script>
+'use strict';
+
+// MAVLink definitions (ardupilotmega dialect), generated from pymavlink.
+const DEFS = {"messages":[[0,"HEARTBEAT",50,"custom_mode:uint32_t,type:uint8_t,autopilot:uint8_t,base_mode:uint8_t,system_status:uint8_t,mavlink_version:uint8_t"],[1,"SYS_STATUS",124,"onboard_control_sensors_present:uint32_t,onboard_control_sensors_enabled:uint32_t,onboard_control_sensors_health:uint32_t,load:uint16_t,voltage_battery:uint16_t,current_battery:int16_t,drop_rate_comm:uint16_t,errors_comm:uint16_t,errors_count1:uint16_t,errors_count2:uint16_t,errors_count3:uint16_t,errors_count4:uint16_t,battery_remaining:int8_t,onboard_control_sensors_present_extended:uint32_t,onboard_control_sensors_enabled_extended:uint32_t,onboard_control_sensors_health_extended:uint32_t"],[2,"SYSTEM_TIME",137,"time_unix_usec:uint64_t,time_boot_ms:uint32_t"],[4,"PING",237,"time_usec:uint64_t,seq:uint32_t,target_system:uint8_t,target_component:uint8_t"],[5,"CHANGE_OPERATOR_CONTROL",217,"target_system:uint8_t,control_request:uint8_t,version:uint8_t,passkey:char:25"],[6,"CHANGE_OPERATOR_CONTROL_ACK",104,"gcs_system_id:uint8_t,control_request:uint8_t,ack:uint8_t"],[7,"AUTH_KEY",119,"key:char:32"],[11,"SET_MODE",89,"custom_mode:uint32_t,target_system:uint8_t,base_mode:uint8_t"],[20,"PARAM_REQUEST_READ",214,"param_index:int16_t,target_system:uint8_t,target_component:uint8_t,param_id:char:16"],[21,"PARAM_REQUEST_LIST",159,"target_system:uint8_t,target_component:uint8_t"],[22,"PARAM_VALUE",220,"param_value:float,param_count:uint16_t,param_index:uint16_t,param_id:char:16,param_type:uint8_t"],[23,"PARAM_SET",168,"param_value:float,target_system:uint8_t,target_component:uint8_t,param_id:char:16,param_type:uint8_t"],[24,"GPS_RAW_INT",24,"time_usec:uint64_t,lat:int32_t,lon:int32_t,alt:int32_t,eph:uint16_t,epv:uint16_t,vel:uint16_t,cog:uint16_t,fix_type:uint8_t,satellites_visible:uint8_t,alt_ellipsoid:int32_t,h_acc:uint32_t,v_acc:uint32_t,vel_acc:uint32_t,hdg_acc:uint32_t,yaw:uint16_t"],[25,"GPS_STATUS",23,"satellites_visible:uint8_t,satellite_prn:uint8_t:20,satellite_used:uint8_t:20,satellite_elevation:uint8_t:20,satellite_azimuth:uint8_t:20,satellite_snr:uint8_t:20"],[26,"SCALED_IMU",170,"time_boot_ms:uint32_t,xacc:int16_t,yacc:int16_t,zacc:int16_t,xgyro:int16_t,ygyro:int16_t,zgyro:int16_t,xmag:int16_t,ymag:int16_t,zmag:int16_t,temperature:int16_t"],[27,"RAW_IMU",144,"time_usec:uint64_t,xacc:int16_t,yacc:int16_t,zacc:int16_t,xgyro:int16_t,ygyro:int16_t,zgyro:int16_t,xmag:int16_t,ymag:int16_t,zmag:int16_t,id:uint8_t,temperature:int16_t"],[28,"RAW_PRESSURE",67,"time_usec:uint64_t,press_abs:int16_t,press_diff1:int16_t,press_diff2:int16_t,temperature:int16_t"],[29,"SCALED_PRESSURE",115,"time_boot_ms:uint32_t,press_abs:float,press_diff:float,temperature:int16_t,temperature_press_diff:int16_t"],[30,"ATTITUDE",39,"time_boot_ms:uint32_t,roll:float,pitch:float,yaw:float,rollspeed:float,pitchspeed:float,yawspeed:float"],[31,"ATTITUDE_QUATERNION",246,"time_boot_ms:uint32_t,q1:float,q2:float,q3:float,q4:float,rollspeed:float,pitchspeed:float,yawspeed:float,repr_offset_q:float:4"],[32,"LOCAL_POSITION_NED",185,"time_boot_ms:uint32_t,x:float,y:float,z:float,vx:float,vy:float,vz:float"],[33,"GLOBAL_POSITION_INT",104,"time_boot_ms:uint32_t,lat:int32_t,lon:int32_t,alt:int32_t,relative_alt:int32_t,vx:int16_t,vy:int16_t,vz:int16_t,hdg:uint16_t"],[34,"RC_CHANNELS_SCALED",237,"time_boot_ms:uint32_t,chan1_scaled:int16_t,chan2_scaled:int16_t,chan3_scaled:int16_t,chan4_scaled:int16_t,chan5_scaled:int16_t,chan6_scaled:int16_t,chan7_scaled:int16_t,chan8_scaled:int16_t,port:uint8_t,rssi:uint8_t"],[35,"RC_CHANNELS_RAW",244,"time_boot_ms:uint32_t,chan1_raw:uint16_t,chan2_raw:uint16_t,chan3_raw:uint16_t,chan4_raw:uint16_t,chan5_raw:uint16_t,chan6_raw:uint16_t,chan7_raw:uint16_t,chan8_raw:uint16_t,port:uint8_t,rssi:uint8_t"],[36,"SERVO_OUTPUT_RAW",222,"time_usec:uint32_t,servo1_raw:uint16_t,servo2_raw:uint16_t,servo3_raw:uint16_t,servo4_raw:uint16_t,servo5_raw:uint16_t,servo6_raw:uint16_t,servo7_raw:uint16_t,servo8_raw:uint16_t,port:uint8_t,servo9_raw:uint16_t,servo10_raw:uint16_t,servo11_raw:uint16_t,servo12_raw:uint16_t,servo13_raw:uint16_t,servo14_raw:uint16_t,servo15_raw:uint16_t,servo16_raw:uint16_t"],[37,"MISSION_REQUEST_PARTIAL_LIST",212,"start_index:int16_t,end_index:int16_t,target_system:uint8_t,target_component:uint8_t,mission_type:uint8_t"],[38,"MISSION_WRITE_PARTIAL_LIST",9,"start_index:int16_t,end_index:int16_t,target_system:uint8_t,target_component:uint8_t,mission_type:uint8_t"],[39,"MISSION_ITEM",254,"param1:float,param2:float,param3:float,param4:float,x:float,y:float,z:float,seq:uint16_t,command:uint16_t,target_system:uint8_t,target_component:uint8_t,frame:uint8_t,current:uint8_t,autocontinue:uint8_t,mission_type:uint8_t"],[40,"MISSION_REQUEST",230,"seq:uint16_t,target_system:uint8_t,target_component:uint8_t,mission_type:uint8_t"],[41,"MISSION_SET_CURRENT",28,"seq:uint16_t,target_system:uint8_t,target_component:uint8_t"],[42,"MISSION_CURRENT",28,"seq:uint16_t,total:uint16_t,mission_state:uint8_t,mission_mode:uint8_t"],[43,"MISSION_REQUEST_LIST",132,"target_system:uint8_t,target_component:uint8_t,mission_type:uint8_t"],[44,"MISSION_COUNT",221,"count:uint16_t,target_system:uint8_t,target_component:uint8_t,mission_type:uint8_t"],[45,"MISSION_CLEAR_ALL",232,"target_system:uint8_t,target_component:uint8_t,mission_type:uint8_t"],[46,"MISSION_ITEM_REACHED",11,"seq:uint16_t"],[47,"MISSION_ACK",153,"target_system:uint8_t,target_component:uint8_t,type:uint8_t,mission_type:uint8_t"],[48,"SET_GPS_GLOBAL_ORIGIN",41,"latitude:int32_t,longitude:int32_t,altitude:int32_t,target_system:uint8_t,time_usec:uint64_t"],[49,"GPS_GLOBAL_ORIGIN",39,"latitude:int32_t,longitude:int32_t,altitude:int32_t,time_usec:uint64_t"],[50,"PARAM_MAP_RC",78,"param_value0:float,scale:float,param_value_min:float,param_value_max:float,param_index:int16_t,target_system:uint8_t,target_component:uint8_t,param_id:char:16,parameter_rc_channel_index:uint8_t"],[51,"MISSION_REQUEST_INT",196,"seq:uint16_t,target_system:uint8_t,target_component:uint8_t,mission_type:uint8_t"],[54,"SAFETY_SET_ALLOWED_AREA",15,"p1x:float,p1y:float,p1z:float,p2x:float,p2y:float,p2z:float,target_system:uint8_t,target_component:uint8_t,frame:uint8_t"],[55,"SAFETY_ALLOWED_AREA",3,"p1x:float,p1y:float,p1z:float,p2x:float,p2y:float,p2z:float,frame:uint8_t"],[61,"ATTITUDE_QUATERNION_COV",167,"time_usec:uint64_t,q:float:4,rollspeed:float,pitchspeed:float,yawspeed:float,covariance:float:9"],[62,"NAV_CONTROLLER_OUTPUT",183,"nav_roll:float,nav_pitch:float,alt_error:float,aspd_error:float,xtrack_error:float,nav_bearing:int16_t,target_bearing:int16_t,wp_dist:uint16_t"],[63,"GLOBAL_POSITION_INT_COV",119,"time_usec:uint64_t,lat:int32_t,lon:int32_t,alt:int32_t,relative_alt:int32_t,vx:float,vy:float,vz:float,covariance:float:36,estimator_type:uint8_t"],[64,"LOCAL_POSITION_NED_COV",191,"time_usec:uint64_t,x:float,y:float,z:float,vx:float,vy:float,vz:float,ax:float,ay:float,az:float,covariance:float:45,estimator_type:uint8_t"],[65,"RC_CHANNELS",118,"time_boot_ms:uint32_t,chan1_raw:uint16_t,chan2_raw:uint16_t,chan3_raw:uint16_t,chan4_raw:uint16_t,chan5_raw:uint16_t,chan6_raw:uint16_t,chan7_raw:uint16_t,chan8_raw:uint16_t,chan9_raw:uint16_t,chan10_raw:uint16_t,chan11_raw:uint16_t,chan12_raw:uint16_t,chan13_raw:uint16_t,chan14_raw:uint16_t,chan15_raw:uint16_t,chan16_raw:uint16_t,chan17_raw:uint16_t,chan18_raw:uint16_t,chancount:uint8_t,rssi:uint8_t"],[66,"REQUEST_DATA_STREAM",148,"req_message_rate:uint16_t,target_system:uint8_t,target_component:uint8_t,req_stream_id:uint8_t,start_stop:uint8_t"],[67,"DATA_STREAM",21,"message_rate:uint16_t,stream_id:uint8_t,on_off:uint8_t"],[69,"MANUAL_CONTROL",243,"x:int16_t,y:int16_t,z:int16_t,r:int16_t,buttons:uint16_t,target:uint8_t,buttons2:uint16_t,enabled_extensions:uint8_t,s:int16_t,t:int16_t,aux1:int16_t,aux2:int16_t,aux3:int16_t,aux4:int16_t,aux5:int16_t,aux6:int16_t"],[70,"RC_CHANNELS_OVERRIDE",124,"chan1_raw:uint16_t,chan2_raw:uint16_t,chan3_raw:uint16_t,chan4_raw:uint16_t,chan5_raw:uint16_t,chan6_raw:uint16_t,chan7_raw:uint16_t,chan8_raw:uint16_t,target_system:uint8_t,target_component:uint8_t,chan9_raw:uint16_t,chan10_raw:uint16_t,chan11_raw:uint16_t,chan12_raw:uint16_t,chan13_raw:uint16_t,chan14_raw:uint16_t,chan15_raw:uint16_t,chan16_raw:uint16_t,chan17_raw:uint16_t,chan18_raw:uint16_t"],[73,"MISSION_ITEM_INT",38,"param1:float,param2:float,param3:float,param4:float,x:int32_t,y:int32_t,z:float,seq:uint16_t,command:uint16_t,target_system:uint8_t,target_component:uint8_t,frame:uint8_t,current:uint8_t,autocontinue:uint8_t,mission_type:uint8_t"],[74,"VFR_HUD",20,"airspeed:float,groundspeed:float,alt:float,climb:float,heading:int16_t,throttle:uint16_t"],[75,"COMMAND_INT",158,"param1:float,param2:float,param3:float,param4:float,x:int32_t,y:int32_t,z:float,command:uint16_t,target_system:uint8_t,target_component:uint8_t,frame:uint8_t,current:uint8_t,autocontinue:uint8_t"],[76,"COMMAND_LONG",152,"param1:float,param2:float,param3:float,param4:float,param5:float,param6:float,param7:float,command:uint16_t,target_system:uint8_t,target_component:uint8_t,confirmation:uint8_t"],[77,"COMMAND_ACK",143,"command:uint16_t,result:uint8_t,progress:uint8_t,result_param2:int32_t,target_system:uint8_t,target_component:uint8_t"],[81,"MANUAL_SETPOINT",106,"time_boot_ms:uint32_t,roll:float,pitch:float,yaw:float,thrust:float,mode_switch:uint8_t,manual_override_switch:uint8_t"],[82,"SET_ATTITUDE_TARGET",49,"time_boot_ms:uint32_t,q:float:4,body_roll_rate:float,body_pitch_rate:float,body_yaw_rate:float,thrust:float,target_system:uint8_t,target_component:uint8_t,type_mask:uint8_t"],[83,"ATTITUDE_TARGET",22,"time_boot_ms:uint32_t,q:float:4,body_roll_rate:float,body_pitch_rate:float,body_yaw_rate:float,thrust:float,type_mask:uint8_t"],[84,"SET_POSITION_TARGET_LOCAL_NED",143,"time_boot_ms:uint32_t,x:float,y:float,z:float,vx:float,vy:float,vz:float,afx:float,afy:float,afz:float,yaw:float,yaw_rate:float,type_mask:uint16_t,target_system:uint8_t,target_component:uint8_t,coordinate_frame:uint8_t"],[85,"POSITION_TARGET_LOCAL_NED",140,"time_boot_ms:uint32_t,x:float,y:float,z:float,vx:float,vy:float,vz:float,afx:float,afy:float,afz:float,yaw:float,yaw_rate:float,type_mask:uint16_t,coordinate_frame:uint8_t"],[86,"SET_POSITION_TARGET_GLOBAL_INT",5,"time_boot_ms:uint32_t,lat_int:int32_t,lon_int:int32_t,alt:float,vx:float,vy:float,vz:float,afx:float,afy:float,afz:float,yaw:float,yaw_rate:float,type_mask:uint16_t,target_system:uint8_t,target_component:uint8_t,coordinate_frame:uint8_t"],[87,"POSITION_TARGET_GLOBAL_INT",150,"time_boot_ms:uint32_t,lat_int:int32_t,lon_int:int32_t,alt:float,vx:float,vy:float,vz:float,afx:float,afy:float,afz:float,yaw:float,yaw_rate:float,type_mask:uint16_t,coordinate_frame:uint8_t"],[89,"LOCAL_POSITION_NED_SYSTEM_GLOBAL_OFFSET",231,"time_boot_ms:uint32_t,x:float,y:float,z:float,roll:float,pitch:float,yaw:float"],[90,"HIL_STATE",183,"time_usec:uint64_t,roll:float,pitch:float,yaw:float,rollspeed:float,pitchspeed:float,yawspeed:float,lat:int32_t,lon:int32_t,alt:int32_t,vx:int16_t,vy:int16_t,vz:int16_t,xacc:int16_t,yacc:int16_t,zacc:int16_t"],[91,"HIL_CONTROLS",63,"time_usec:uint64_t,roll_ailerons:float,pitch_elevator:float,yaw_rudder:float,throttle:float,aux1:float,aux2:float,aux3:float,aux4:float,mode:uint8_t,nav_mode:uint8_t"],[92,"HIL_RC_INPUTS_RAW",54,"time_usec:uint64_t,chan1_raw:uint16_t,chan2_raw:uint16_t,chan3_raw:uint16_t,chan4_raw:uint16_t,chan5_raw:uint16_t,chan6_raw:uint16_t,chan7_raw:uint16_t,chan8_raw:uint16_t,chan9_raw:uint16_t,chan10_raw:uint16_t,chan11_raw:uint16_t,chan12_raw:uint16_t,rssi:uint8_t"],[93,"HIL_ACTUATOR_CONTROLS",47,"time_usec:uint64_t,flags:uint64_t,controls:float:16,mode:uint8_t"],[100,"OPTICAL_FLOW",175,"time_usec:uint64_t,flow_comp_m_x:float,flow_comp_m_y:float,ground_distance:float,flow_x:int16_t,flow_y:int16_t,sensor_id:uint8_t,quality:uint8_t,flow_rate_x:float,flow_rate_y:float"],[101,"GLOBAL_VISION_POSITION_ESTIMATE",102,"usec:uint64_t,x:float,y:float,z:float,roll:float,pitch:float,yaw:float,covariance:float:21,reset_counter:uint8_t"],[102,"VISION_POSITION_ESTIMATE",158,"usec:uint64_t,x:float,y:float,z:float,roll:float,pitch:float,yaw:float,covariance:float:21,reset_counter:uint8_t"],[103,"VISION_SPEED_ESTIMATE",208,"usec:uint64_t,x:float,y:float,z:float,covariance:float:9,reset_counter:uint8_t"],[104,"VICON_POSITION_ESTIMATE",56,"usec:uint64_t,x:float,y:float,z:float,roll:float,pitch:float,yaw:float,covariance:float:21"],[105,"HIGHRES_IMU",93,"time_usec:uint64_t,xacc:float,yacc:float,zacc:float,xgyro:float,ygyro:float,zgyro:float,xmag:float,ymag:float,zmag:float,abs_pressure:float,diff_pressure:float,pressure_alt:float,temperature:float,fields_updated:uint16_t,id:uint8_t"],[106,"OPTICAL_FLOW_RAD",138,"time_usec:uint64_t,integration_time_us:uint32_t,integrated_x:float,integrated_y:float,integrated_xgyro:float,integrated_ygyro:float,integrated_zgyro:float,time_delta_distance_us:uint32_t,distance:float,temperature:int16_t,sensor_id:uint8_t,quality:uint8_t"],[107,"HIL_SENSOR",108,"time_usec:uint64_t,xacc:float,yacc:float,zacc:float,xgyro:float,ygyro:float,zgyro:float,xmag:float,ymag:float,zmag:float,abs_pressure:float,diff_pressure:float,pressure_alt:float,temperature:float,fields_updated:uint32_t,id:uint8_t"],[108,"SIM_STATE",32,"q1:float,q2:float,q3:float,q4:float,roll:float,pitch:float,yaw:float,xacc:float,yacc:float,zacc:float,xgyro:float,ygyro:float,zgyro:float,lat:float,lon:float,alt:float,std_dev_horz:float,std_dev_vert:float,vn:float,ve:float,vd:float,lat_int:int32_t,lon_int:int32_t"],[109,"RADIO_STATUS",185,"rxerrors:uint16_t,fixed:uint16_t,rssi:uint8_t,remrssi:uint8_t,txbuf:uint8_t,noise:uint8_t,remnoise:uint8_t"],[110,"FILE_TRANSFER_PROTOCOL",84,"target_network:uint8_t,target_system:uint8_t,target_component:uint8_t,payload:uint8_t:251"],[111,"TIMESYNC",34,"tc1:int64_t,ts1:int64_t"],[112,"CAMERA_TRIGGER",174,"time_usec:uint64_t,seq:uint32_t"],[113,"HIL_GPS",124,"time_usec:uint64_t,lat:int32_t,lon:int32_t,alt:int32_t,eph:uint16_t,epv:uint16_t,vel:uint16_t,vn:int16_t,ve:int16_t,vd:int16_t,cog:uint16_t,fix_type:uint8_t,satellites_visible:uint8_t,id:uint8_t,yaw:uint16_t"],[114,"HIL_OPTICAL_FLOW",237,"time_usec:uint64_t,integration_time_us:uint32_t,integrated_x:float,integrated_y:float,integrated_xgyro:float,integrated_ygyro:float,integrated_zgyro:float,time_delta_distance_us:uint32_t,distance:float,temperature:int16_t,sensor_id:uint8_t,quality:uint8_t"],[115,"HIL_STATE_QUATERNION",4,"time_usec:uint64_t,attitude_quaternion:float:4,rollspeed:float,pitchspeed:float,yawspeed:float,lat:int32_t,lon:int32_t,alt:int32_t,vx:int16_t,vy:int16_t,vz:int16_t,ind_airspeed:uint16_t,true_airspeed:uint16_t,xacc:int16_t,yacc:int16_t,zacc:int16_t"],[116,"SCALED_IMU2",76,"time_boot_ms:uint32_t,xacc:int16_t,yacc:int16_t,zacc:int16_t,xgyro:int16_t,ygyro:int16_t,zgyro:int16_t,xmag:int16_t,ymag:int16_t,zmag:int16_t,temperature:int16_t"],[117,"LOG_REQUEST_LIST",128,"start:uint16_t,end:uint16_t,target_system:uint8_t,target_component:uint8_t"],[118,"LOG_ENTRY",56,"time_utc:uint32_t,size:uint32_t,id:uint16_t,num_logs:uint16_t,last_log_num:uint16_t"],[119,"LOG_REQUEST_DATA",116,"ofs:uint32_t,count:uint32_t,id:uint16_t,target_system:uint8_t,target_component:uint8_t"],[120,"LOG_DATA",134,"ofs:uint32_t,id:uint16_t,count:uint8_t,data:uint8_t:90"],[121,"LOG_ERASE",237,"target_system:uint8_t,target_component:uint8_t"],[122,"LOG_REQUEST_END",203,"target_system:uint8_t,target_component:uint8_t"],[123,"GPS_INJECT_DATA",250,"target_system:uint8_t,target_component:uint8_t,len:uint8_t,data:uint8_t:110"],[124,"GPS2_RAW",87,"time_usec:uint64_t,lat:int32_t,lon:int32_t,alt:int32_t,dgps_age:uint32_t,eph:uint16_t,epv:uint16_t,vel:uint16_t,cog:uint16_t,fix_type:uint8_t,satellites_visible:uint8_t,dgps_numch:uint8_t,yaw:uint16_t,alt_ellipsoid:int32_t,h_acc:uint32_t,v_acc:uint32_t,vel_acc:uint32_t,hdg_acc:uint32_t"],[125,"POWER_STATUS",203,"Vcc:uint16_t,Vservo:uint16_t,flags:uint16_t"],[126,"SERIAL_CONTROL",220,"baudrate:uint32_t,timeout:uint16_t,device:uint8_t,flags:uint8_t,count:uint8_t,data:uint8_t:70"],[127,"GPS_RTK",25,"time_last_baseline_ms:uint32_t,tow:uint32_t,baseline_a_mm:int32_t,baseline_b_mm:int32_t,baseline_c_mm:int32_t,accuracy:uint32_t,iar_num_hypotheses:int32_t,wn:uint16_t,rtk_receiver_id:uint8_t,rtk_health:uint8_t,rtk_rate:uint8_t,nsats:uint8_t,baseline_coords_type:uint8_t"],[128,"GPS2_RTK",226,"time_last_baseline_ms:uint32_t,tow:uint32_t,baseline_a_mm:int32_t,baseline_b_mm:int32_t,baseline_c_mm:int32_t,accuracy:uint32_t,iar_num_hypotheses:int32_t,wn:uint16_t,rtk_receiver_id:uint8_t,rtk_health:uint8_t,rtk_rate:uint8_t,nsats:uint8_t,baseline_coords_type:uint8_t"],[129,"SCALED_IMU3",46,"time_boot_ms:uint32_t,xacc:int16_t,yacc:int16_t,zacc:int16_t,xgyro:int16_t,ygyro:int16_t,zgyro:int16_t,xmag:int16_t,ymag:int16_t,zmag:int16_t,temperature:int16_t"],[130,"DATA_TRANSMISSION_HANDSHAKE",29,"size:uint32_t,width:uint16_t,height:uint16_t,packets:uint16_t,type:uint8_t,payload:uint8_t,jpg_quality:uint8_t"],[131,"ENCAPSULATED_DATA",223,"seqnr:uint16_t,data:uint8_t:253"],[132,"DISTANCE_SENSOR",85,"time_boot_ms:uint32_t,min_distance:uint16_t,max_distance:uint16_t,current_distance:uint16_t,type:uint8_t,id:uint8_t,orientation:uint8_t,covariance:uint8_t,horizontal_fov:float,vertical_fov:float,quaternion:float:4,signal_quality:uint8_t"],[133,"TERRAIN_REQUEST",6,"mask:uint64_t,lat:int32_t,lon:int32_t,grid_spacing:uint16_t"],[134,"TERRAIN_DATA",229,"lat:int32_t,lon:int32_t,grid_spacing:uint16_t,data:int16_t:16,gridbit:uint8_t"],[135,"TERRAIN_CHECK",203,"lat:int32_t,lon:int32_t"],[136,"TERRAIN_REPORT",1,"lat:int32_t,lon:int32_t,terrain_height:float,current_height:float,spacing:uint16_t,pending:uint16_t,loaded:uint16_t"],[137,"SCALED_PRESSURE2",195,"time_boot_ms:uint32_t,press_abs:float,press_diff:float,temperature:int16_t,temperature_press_diff:int16_t"],[138,"ATT_POS_MOCAP",109,"time_usec:uint64_t,q:float:4,x:float,y:float,z:float,covariance:float:21"],[139,"SET_ACTUATOR_CONTROL_TARGET",168,"time_usec:uint64_t,controls:float:8,group_mlx:uint8_t,target_system:uint8_t,target_component:uint8_t"],[140,"ACTUATOR_CONTROL_TARGET",181,"time_usec:uint64_t,controls:float:8,group_mlx:uint8_t"],[141,"ALTITUDE",47,"time_usec:uint64_t,altitude_monotonic:float,altitude_amsl:float,altitude_local:float,altitude_relative:float,altitude_terrain:float,bottom_clearance:float"],[142,"RESOURCE_REQUEST",72,"request_id:uint8_t,uri_type:uint8_t,uri:uint8_t:120,transfer_type:uint8_t,storage:uint8_t:120"],[143,"SCALED_PRESSURE3",131,"time_boot_ms:uint32_t,press_abs:float,press_diff:float,temperature:int16_t,temperature_press_diff:int16_t"],[144,"FOLLOW_TARGET",127,"timestamp:uint64_t,custom_state:uint64_t,lat:int32_t,lon:int32_t,alt:float,vel:float:3,acc:float:3,attitude_q:float:4,rates:float:3,position_cov:float:3,est_capabilities:uint8_t"],[146,"CONTROL_SYSTEM_STATE",103,"time_usec:uint64_t,x_acc:float,y_acc:float,z_acc:float,x_vel:float,y_vel:float,z_vel:float,x_pos:float,y_pos:float,z_pos:float,airspeed:float,vel_variance:float:3,pos_variance:float:3,q:float:4,roll_rate:float,pitch_rate:float,yaw_rate:float"],[147,"BATTERY_STATUS",154,"current_consumed:int32_t,energy_consumed:int32_t,temperature:int16_t,voltages:uint16_t:10,current_battery:int16_t,id:uint8_t,battery_function:uint8_t,type:uint8_t,battery_remaining:int8_t,time_remaining:int32_t,charge_state:uint8_t,voltages_ext:uint16_t:4,mode:uint8_t,fault_bitmask:uint32_t"],[148,"AUTOPILOT_VERSION",178,"capabilities:uint64_t,uid:uint64_t,flight_sw_version:uint32_t,middleware_sw_version:uint32_t,os_sw_version:uint32_t,board_version:uint32_t,vendor_id:uint16_t,product_id:uint16_t,flight_custom_version:uint8_t:8,middleware_custom_version:uint8_t:8,os_custom_version:uint8_t:8,uid2:uint8_t:18"],[149,"LANDING_TARGET",200,"time_usec:uint64_t,angle_x:float,angle_y:float,distance:float,size_x:float,size_y:float,target_num:uint8_t,frame:uint8_t,x:float,y:float,z:float,q:float:4,type:uint8_t,position_valid:uint8_t"],[150,"SENSOR_OFFSETS",134,"mag_declination:float,raw_press:int32_t,raw_temp:int32_t,gyro_cal_x:float,gyro_cal_y:float,gyro_cal_z:float,accel_cal_x:float,accel_cal_y:float,accel_cal_z:float,mag_ofs_x:int16_t,mag_ofs_y:int16_t,mag_ofs_z:int16_t"],[151,"SET_MAG_OFFSETS",219,"mag_ofs_x:int16_t,mag_ofs_y:int16_t,mag_ofs_z:int16_t,target_system:uint8_t,target_component:uint8_t"],[152,"MEMINFO",208,"brkval:uint16_t,freemem:uint16_t,freemem32:uint32_t"],[153,"AP_ADC",188,"adc1:uint16_t,adc2:uint16_t,adc3:uint16_t,adc4:uint16_t,adc5:uint16_t,adc6:uint16_t"],[154,"DIGICAM_CONFIGURE",84,"extra_value:float,shutter_speed:uint16_t,target_system:uint8_t,target_component:uint8_t,mode:uint8_t,aperture:uint8_t,iso:uint8_t,exposure_type:uint8_t,command_id:uint8_t,engine_cut_off:uint8_t,extra_param:uint8_t"],[155,"DIGICAM_CONTROL",22,"extra_value:float,target_system:uint8_t,target_component:uint8_t,session:uint8_t,zoom_pos:uint8_t,zoom_step:int8_t,focus_lock:uint8_t,shot:uint8_t,command_id:uint8_t,extra_param:uint8_t"],[156,"MOUNT_CONFIGURE",19,"target_system:uint8_t,target_component:uint8_t,mount_mode:uint8_t,stab_roll:uint8_t,stab_pitch:uint8_t,stab_yaw:uint8_t"],[157,"MOUNT_CONTROL",21,"input_a:int32_t,input_b:int32_t,input_c:int32_t,target_system:uint8_t,target_component:uint8_t,save_position:uint8_t"],[158,"MOUNT_STATUS",134,"pointing_a:int32_t,pointing_b:int32_t,pointing_c:int32_t,target_system:uint8_t,target_component:uint8_t,mount_mode:uint8_t"],[160,"FENCE_POINT",78,"lat:float,lng:float,target_system:uint8_t,target_component:uint8_t,idx:uint8_t,count:uint8_t"],[161,"FENCE_FETCH_POINT",68,"target_system:uint8_t,target_component:uint8_t,idx:uint8_t"],[162,"FENCE_STATUS",189,"breach_time:uint32_t,breach_count:uint16_t,breach_status:uint8_t,breach_type:uint8_t,breach_mitigation:uint8_t"],[163,"AHRS",127,"omegaIx:float,omegaIy:float,omegaIz:float,accel_weight:float,renorm_val:float,error_rp:float,error_yaw:float"],[164,"SIMSTATE",154,"roll:float,pitch:float,yaw:float,xacc:float,yacc:float,zacc:float,xgyro:float,ygyro:float,zgyro:float,lat:int32_t,lng:int32_t"],[165,"HWSTATUS",21,"Vcc:uint16_t,I2Cerr:uint8_t"],[166,"RADIO",21,"rxerrors:uint16_t,fixed:uint16_t,rssi:uint8_t,remrssi:uint8_t,txbuf:uint8_t,noise:uint8_t,remnoise:uint8_t"],[167,"LIMITS_STATUS",144,"last_trigger:uint32_t,last_action:uint32_t,last_recovery:uint32_t,last_clear:uint32_t,breach_count:uint16_t,limits_state:uint8_t,mods_enabled:uint8_t,mods_required:uint8_t,mods_triggered:uint8_t"],[168,"WIND",1,"direction:float,speed:float,speed_z:float"],[169,"DATA16",234,"type:uint8_t,len:uint8_t,data:uint8_t:16"],[170,"DATA32",73,"type:uint8_t,len:uint8_t,data:uint8_t:32"],[171,"DATA64",181,"type:uint8_t,len:uint8_t,data:uint8_t:64"],[172,"DATA96",22,"type:uint8_t,len:uint8_t,data:uint8_t:96"],[173,"RANGEFINDER",83,"distance:float,voltage:float"],[174,"AIRSPEED_AUTOCAL",167,"vx:float,vy:float,vz:float,diff_pressure:float,EAS2TAS:float,ratio:float,state_x:float,state_y:float,state_z:float,Pax:float,Pby:float,Pcz:float"],[175,"RALLY_POINT",138,"lat:int32_t,lng:int32_t,alt:int16_t,break_alt:int16_t,land_dir:uint16_t,target_system:uint8_t,target_component:uint8_t,idx:uint8_t,count:uint8_t,flags:uint8_t"],[176,"RALLY_FETCH_POINT",234,"target_system:uint8_t,target_component:uint8_t,idx:uint8_t"],[177,"COMPASSMOT_STATUS",240,"current:float,CompensationX:float,CompensationY:float,CompensationZ:float,throttle:uint16_t,interference:uint16_t"],[178,"AHRS2",47,"roll:float,pitch:float,yaw:float,altitude:float,lat:int32_t,lng:int32_t"],[179,"CAMERA_STATUS",189,"time_usec:uint64_t,p1:float,p2:float,p3:float,p4:float,img_idx:uint16_t,target_system:uint8_t,cam_idx:uint8_t,event_id:uint8_t"],[180,"CAMERA_FEEDBACK",52,"time_usec:uint64_t,lat:int32_t,lng:int32_t,alt_msl:float,alt_rel:float,roll:float,pitch:float,yaw:float,foc_len:float,img_idx:uint16_t,target_system:uint8_t,cam_idx:uint8_t,flags:uint8_t,completed_captures:uint16_t"],[181,"BATTERY2",174,"voltage:uint16_t,current_battery:int16_t"],[182,"AHRS3",229,"roll:float,pitch:float,yaw:float,altitude:float,lat:int32_t,lng:int32_t,v1:float,v2:float,v3:float,v4:float"],[183,"AUTOPILOT_VERSION_REQUEST",85,"target_system:uint8_t,target_component:uint8_t"],[184,"REMOTE_LOG_DATA_BLOCK",159,"seqno:uint32_t,target_system:uint8_t,target_component:uint8_t,data:uint8_t:200"],[185,"REMOTE_LOG_BLOCK_STATUS",186,"seqno:uint32_t,target_system:uint8_t,target_component:uint8_t,status:uint8_t"],[186,"LED_CONTROL",72,"target_system:uint8_t,target_component:uint8_t,instance:uint8_t,pattern:uint8_t,custom_len:uint8_t,custom_bytes:uint8_t:24"],[191,"MAG_CAL_PROGRESS",92,"direction_x:float,direction_y:float,direction_z:float,compass_id:uint8_t,cal_mask:uint8_t,cal_status:uint8_t,attempt:uint8_t,completion_pct:uint8_t,completion_mask:uint8_t:10"],[192,"MAG_CAL_REPORT",36,"fitness:float,ofs_x:float,ofs_y:float,ofs_z:float,diag_x:float,diag_y:float,diag_z:float,offdiag_x:float,offdiag_y:float,offdiag_z:float,compass_id:uint8_t,cal_mask:uint8_t,cal_status:uint8_t,autosaved:uint8_t,orientation_confidence:float,old_orientation:uint8_t,new_orientation:uint8_t,scale_factor:float"],[193,"EKF_STATUS_REPORT",71,"velocity_variance:float,pos_horiz_variance:float,pos_vert_variance:float,compass_variance:float,terrain_alt_variance:float,flags:uint16_t,airspeed_variance:float"],[194,"PID_TUNING",98,"desired:float,achieved:float,FF:float,P:float,I:float,D:float,axis:uint8_t,SRate:float,PDmod:float"],[195,"DEEPSTALL",120,"landing_lat:int32_t,landing_lon:int32_t,path_lat:int32_t,path_lon:int32_t,arc_entry_lat:int32_t,arc_entry_lon:int32_t,altitude:float,expected_travel_distance:float,cross_track_error:float,stage:uint8_t"],[200,"GIMBAL_REPORT",134,"delta_time:float,delta_angle_x:float,delta_angle_y:float,delta_angle_z:float,delta_velocity_x:float,delta_velocity_y:float,delta_velocity_z:float,joint_roll:float,joint_el:float,joint_az:float,target_system:uint8_t,target_component:uint8_t"],[201,"GIMBAL_CONTROL",205,"demanded_rate_x:float,demanded_rate_y:float,demanded_rate_z:float,target_system:uint8_t,target_component:uint8_t"],[214,"GIMBAL_TORQUE_CMD_REPORT",69,"rl_torque_cmd:int16_t,el_torque_cmd:int16_t,az_torque_cmd:int16_t,target_system:uint8_t,target_component:uint8_t"],[215,"GOPRO_HEARTBEAT",101,"status:uint8_t,capture_mode:uint8_t,flags:uint8_t"],[216,"GOPRO_GET_REQUEST",50,"target_system:uint8_t,target_component:uint8_t,cmd_id:uint8_t"],[217,"GOPRO_GET_RESPONSE",202,"cmd_id:uint8_t,status:uint8_t,value:uint8_t:4"],[218,"GOPRO_SET_REQUEST",17,"target_system:uint8_t,target_component:uint8_t,cmd_id:uint8_t,value:uint8_t:4"],[219,"GOPRO_SET_RESPONSE",162,"cmd_id:uint8_t,status:uint8_t"],[225,"EFI_STATUS",208,"ecu_index:float,rpm:float,fuel_consumed:float,fuel_flow:float,engine_load:float,throttle_position:float,spark_dwell_time:float,barometric_pressure:float,intake_manifold_pressure:float,intake_manifold_temperature:float,cylinder_head_temperature:float,ignition_timing:float,injection_time:float,exhaust_gas_temperature:float,throttle_out:float,pt_compensation:float,health:uint8_t,ignition_voltage:float,fuel_pressure:float"],[226,"RPM",207,"rpm1:float,rpm2:float"],[230,"ESTIMATOR_STATUS",163,"time_usec:uint64_t,vel_ratio:float,pos_horiz_ratio:float,pos_vert_ratio:float,mag_ratio:float,hagl_ratio:float,tas_ratio:float,pos_horiz_accuracy:float,pos_vert_accuracy:float,flags:uint16_t"],[231,"WIND_COV",105,"time_usec:uint64_t,wind_x:float,wind_y:float,wind_z:float,var_horiz:float,var_vert:float,wind_alt:float,horiz_accuracy:float,vert_accuracy:float"],[232,"GPS_INPUT",151,"time_usec:uint64_t,time_week_ms:uint32_t,lat:int32_t,lon:int32_t,alt:float,hdop:float,vdop:float,vn:float,ve:float,vd:float,speed_accuracy:float,horiz_accuracy:float,vert_accuracy:float,ignore_flags:uint16_t,time_week:uint16_t,gps_id:uint8_t,fix_type:uint8_t,satellites_visible:uint8_t,yaw:uint16_t"],[233,"GPS_RTCM_DATA",35,"flags:uint8_t,len:uint8_t,data:uint8_t:180"],[234,"HIGH_LATENCY",150,"custom_mode:uint32_t,latitude:int32_t,longitude:int32_t,roll:int16_t,pitch:int16_t,heading:uint16_t,heading_sp:int16_t,altitude_amsl:int16_t,altitude_sp:int16_t,wp_distance:uint16_t,base_mode:uint8_t,landed_state:uint8_t,throttle:int8_t,airspeed:uint8_t,airspeed_sp:uint8_t,groundspeed:uint8_t,climb_rate:int8_t,gps_nsat:uint8_t,gps_fix_type:uint8_t,battery_remaining:uint8_t,temperature:int8_t,temperature_air:int8_t,failsafe:uint8_t,wp_num:uint8_t"],[235,"HIGH_LATENCY2",179,"timestamp:uint32_t,latitude:int32_t,longitude:int32_t,custom_mode:uint16_t,altitude:int16_t,target_altitude:int16_t,target_distance:uint16_t,wp_num:uint16_t,failure_flags:uint16_t,type:uint8_t,autopilot:uint8_t,heading:uint8_t,target_heading:uint8_t,throttle:uint8_t,airspeed:uint8_t,airspeed_sp:uint8_t,groundspeed:uint8_t,windspeed:uint8_t,wind_heading:uint8_t,eph:uint8_t,epv:uint8_t,temperature_air:int8_t,climb_rate:int8_t,battery:int8_t,custom0:int8_t,custom1:int8_t,custom2:int8_t"],[241,"VIBRATION",90,"time_usec:uint64_t,vibration_x:float,vibration_y:float,vibration_z:float,clipping_0:uint32_t,clipping_1:uint32_t,clipping_2:uint32_t"],[242,"HOME_POSITION",104,"latitude:int32_t,longitude:int32_t,altitude:int32_t,x:float,y:float,z:float,q:float:4,approach_x:float,approach_y:float,approach_z:float,time_usec:uint64_t"],[243,"SET_HOME_POSITION",85,"latitude:int32_t,longitude:int32_t,altitude:int32_t,x:float,y:float,z:float,q:float:4,approach_x:float,approach_y:float,approach_z:float,target_system:uint8_t,time_usec:uint64_t"],[244,"MESSAGE_INTERVAL",95,"interval_us:int32_t,message_id:uint16_t"],[245,"EXTENDED_SYS_STATE",130,"vtol_state:uint8_t,landed_state:uint8_t"],[246,"ADSB_VEHICLE",184,"ICAO_address:uint32_t,lat:int32_t,lon:int32_t,altitude:int32_t,heading:uint16_t,hor_velocity:uint16_t,ver_velocity:int16_t,flags:uint16_t,squawk:uint16_t,altitude_type:uint8_t,callsign:char:9,emitter_type:uint8_t,tslc:uint8_t"],[247,"COLLISION",81,"id:uint32_t,time_to_minimum_delta:float,altitude_minimum_delta:float,horizontal_minimum_delta:float,src:uint8_t,action:uint8_t,threat_level:uint8_t"],[248,"V2_EXTENSION",8,"message_type:uint16_t,target_network:uint8_t,target_system:uint8_t,target_component:uint8_t,payload:uint8_t:249"],[249,"MEMORY_VECT",204,"address:uint16_t,ver:uint8_t,type:uint8_t,value:int8_t:32"],[250,"DEBUG_VECT",49,"time_usec:uint64_t,x:float,y:float,z:float,name:char:10"],[251,"NAMED_VALUE_FLOAT",170,"time_boot_ms:uint32_t,value:float,name:char:10"],[252,"NAMED_VALUE_INT",44,"time_boot_ms:uint32_t,value:int32_t,name:char:10"],[253,"STATUSTEXT",83,"severity:uint8_t,text:char:50,id:uint16_t,chunk_seq:uint8_t"],[254,"DEBUG",46,"time_boot_ms:uint32_t,value:float,ind:uint8_t"],[256,"SETUP_SIGNING",71,"initial_timestamp:uint64_t,target_system:uint8_t,target_component:uint8_t,secret_key:uint8_t:32"],[257,"BUTTON_CHANGE",131,"time_boot_ms:uint32_t,last_change_ms:uint32_t,state:uint8_t"],[258,"PLAY_TUNE",187,"target_system:uint8_t,target_component:uint8_t,tune:char:30,tune2:char:200"],[259,"CAMERA_INFORMATION",92,"time_boot_ms:uint32_t,firmware_version:uint32_t,focal_length:float,sensor_size_h:float,sensor_size_v:float,flags:uint32_t,resolution_h:uint16_t,resolution_v:uint16_t,cam_definition_version:uint16_t,vendor_name:uint8_t:32,model_name:uint8_t:32,lens_id:uint8_t,cam_definition_uri:char:140,gimbal_device_id:uint8_t,camera_device_id:uint8_t"],[260,"CAMERA_SETTINGS",146,"time_boot_ms:uint32_t,mode_id:uint8_t,zoomLevel:float,focusLevel:float,camera_device_id:uint8_t"],[261,"STORAGE_INFORMATION",179,"time_boot_ms:uint32_t,total_capacity:float,used_capacity:float,available_capacity:float,read_speed:float,write_speed:float,storage_id:uint8_t,storage_count:uint8_t,status:uint8_t,type:uint8_t,name:char:32,storage_usage:uint8_t"],[262,"CAMERA_CAPTURE_STATUS",12,"time_boot_ms:uint32_t,image_interval:float,recording_time_ms:uint32_t,available_capacity:float,image_status:uint8_t,video_status:uint8_t,image_count:int32_t,camera_device_id:uint8_t"],[263,"CAMERA_IMAGE_CAPTURED",133,"time_utc:uint64_t,time_boot_ms:uint32_t,lat:int32_t,lon:int32_t,alt:int32_t,relative_alt:int32_t,q:float:4,image_index:int32_t,camera_id:uint8_t,capture_result:int8_t,file_url:char:205"],[264,"FLIGHT_INFORMATION",49,"arming_time_utc:uint64_t,takeoff_time_utc:uint64_t,flight_uuid:uint64_t,time_boot_ms:uint32_t,landing_time:uint32_t"],[265,"MOUNT_ORIENTATION",26,"time_boot_ms:uint32_t,roll:float,pitch:float,yaw:float,yaw_absolute:float"],[266,"LOGGING_DATA",193,"sequence:uint16_t,target_system:uint8_t,target_component:uint8_t,length:uint8_t,first_message_offset:uint8_t,data:uint8_t:249"],[267,"LOGGING_DATA_ACKED",35,"sequence:uint16_t,target_system:uint8_t,target_component:uint8_t,length:uint8_t,first_message_offset:uint8_t,data:uint8_t:249"],[268,"LOGGING_ACK",14,"sequence:uint16_t,target_system:uint8_t,target_component:uint8_t"],[269,"VIDEO_STREAM_INFORMATION",109,"framerate:float,bitrate:uint32_t,flags:uint16_t,resolution_h:uint16_t,resolution_v:uint16_t,rotation:uint16_t,hfov:uint16_t,stream_id:uint8_t,count:uint8_t,type:uint8_t,name:char:32,uri:char:160,encoding:uint8_t,camera_device_id:uint8_t"],[270,"VIDEO_STREAM_STATUS",59,"framerate:float,bitrate:uint32_t,flags:uint16_t,resolution_h:uint16_t,resolution_v:uint16_t,rotation:uint16_t,hfov:uint16_t,stream_id:uint8_t,camera_device_id:uint8_t"],[271,"CAMERA_FOV_STATUS",22,"time_boot_ms:uint32_t,lat_camera:int32_t,lon_camera:int32_t,alt_camera:int32_t,lat_image:int32_t,lon_image:int32_t,alt_image:int32_t,q:float:4,hfov:float,vfov:float,camera_device_id:uint8_t"],[275,"CAMERA_TRACKING_IMAGE_STATUS",126,"point_x:float,point_y:float,radius:float,rec_top_x:float,rec_top_y:float,rec_bottom_x:float,rec_bottom_y:float,tracking_status:uint8_t,tracking_mode:uint8_t,target_data:uint8_t,camera_device_id:uint8_t"],[276,"CAMERA_TRACKING_GEO_STATUS",18,"lat:int32_t,lon:int32_t,alt:float,h_acc:float,v_acc:float,vel_n:float,vel_e:float,vel_d:float,vel_acc:float,dist:float,hdg:float,hdg_acc:float,tracking_status:uint8_t,camera_device_id:uint8_t"],[277,"CAMERA_THERMAL_RANGE",62,"time_boot_ms:uint32_t,max:float,max_point_x:float,max_point_y:float,min:float,min_point_x:float,min_point_y:float,stream_id:uint8_t,camera_device_id:uint8_t"],[280,"GIMBAL_MANAGER_INFORMATION",70,"time_boot_ms:uint32_t,cap_flags:uint32_t,roll_min:float,roll_max:float,pitch_min:float,pitch_max:float,yaw_min:float,yaw_max:float,gimbal_device_id:uint8_t"],[281,"GIMBAL_MANAGER_STATUS",48,"time_boot_ms:uint32_t,flags:uint32_t,gimbal_device_id:uint8_t,primary_control_sysid:uint8_t,primary_control_compid:uint8_t,secondary_control_sysid:uint8_t,secondary_control_compid:uint8_t"],[282,"GIMBAL_MANAGER_SET_ATTITUDE",123,"flags:uint32_t,q:float:4,angular_velocity_x:float,angular_velocity_y:float,angular_velocity_z:float,target_system:uint8_t,target_component:uint8_t,gimbal_device_id:uint8_t"],[283,"GIMBAL_DEVICE_INFORMATION",74,"uid:uint64_t,time_boot_ms:uint32_t,firmware_version:uint32_t,hardware_version:uint32_t,roll_min:float,roll_max:float,pitch_min:float,pitch_max:float,yaw_min:float,yaw_max:float,cap_flags:uint16_t,custom_cap_flags:uint16_t,vendor_name:char:32,model_name:char:32,custom_name:char:32,gimbal_device_id:uint8_t,cap_flags2:uint32_t"],[284,"GIMBAL_DEVICE_SET_ATTITUDE",99,"q:float:4,angular_velocity_x:float,angular_velocity_y:float,angular_velocity_z:float,flags:uint16_t,target_system:uint8_t,target_component:uint8_t"],[285,"GIMBAL_DEVICE_ATTITUDE_STATUS",137,"time_boot_ms:uint32_t,q:float:4,angular_velocity_x:float,angular_velocity_y:float,angular_velocity_z:float,failure_flags:uint32_t,flags:uint16_t,target_system:uint8_t,target_component:uint8_t,delta_yaw:float,delta_yaw_velocity:float,gimbal_device_id:uint8_t"],[286,"AUTOPILOT_STATE_FOR_GIMBAL_DEVICE",210,"time_boot_us:uint64_t,q:float:4,q_estimated_delay_us:uint32_t,vx:float,vy:float,vz:float,v_estimated_delay_us:uint32_t,feed_forward_angular_velocity_z:float,estimator_status:uint16_t,target_system:uint8_t,target_component:uint8_t,landed_state:uint8_t,angular_velocity_z:float"],[287,"GIMBAL_MANAGER_SET_PITCHYAW",1,"flags:uint32_t,pitch:float,yaw:float,pitch_rate:float,yaw_rate:float,target_system:uint8_t,target_component:uint8_t,gimbal_device_id:uint8_t"],[288,"GIMBAL_MANAGER_SET_MANUAL_CONTROL",20,"flags:uint32_t,pitch:float,yaw:float,pitch_rate:float,yaw_rate:float,target_system:uint8_t,target_component:uint8_t,gimbal_device_id:uint8_t"],[295,"AIRSPEED",234,"airspeed:float,raw_press:float,temperature:int16_t,id:uint8_t,flags:uint8_t"],[296,"GLOBAL_POSITION_SENSOR",158,"time_usec:uint64_t,processing_time:uint32_t,lat:int32_t,lon:int32_t,alt_ellipsoid:float,alt:float,eph:float,epv:float,target_system:uint8_t,target_component:uint8_t,id:uint8_t,source:uint8_t,flags:uint8_t"],[299,"WIFI_CONFIG_AP",19,"ssid:char:32,password:char:64"],[301,"AIS_VESSEL",243,"MMSI:uint32_t,lat:int32_t,lon:int32_t,COG:uint16_t,heading:uint16_t,velocity:uint16_t,dimension_bow:uint16_t,dimension_stern:uint16_t,tslc:uint16_t,flags:uint16_t,turn_rate:int8_t,navigational_status:uint8_t,type:uint8_t,dimension_port:uint8_t,dimension_starboard:uint8_t,callsign:char:7,name:char:20"],[310,"UAVCAN_NODE_STATUS",28,"time_usec:uint64_t,uptime_sec:uint32_t,vendor_specific_status_code:uint16_t,health:uint8_t,mode:uint8_t,sub_mode:uint8_t"],[311,"UAVCAN_NODE_INFO",95,"time_usec:uint64_t,uptime_sec:uint32_t,sw_vcs_commit:uint32_t,name:char:80,hw_version_major:uint8_t,hw_version_minor:uint8_t,hw_unique_id:uint8_t:16,sw_version_major:uint8_t,sw_version_minor:uint8_t"],[320,"PARAM_EXT_REQUEST_READ",243,"param_index:int16_t,target_system:uint8_t,target_component:uint8_t,param_id:char:16"],[321,"PARAM_EXT_REQUEST_LIST",88,"target_system:uint8_t,target_component:uint8_t"],[322,"PARAM_EXT_VALUE",243,"param_count:uint16_t,param_index:uint16_t,param_id:char:16,param_value:char:128,param_type:uint8_t"],[323,"PARAM_EXT_SET",78,"target_system:uint8_t,target_component:uint8_t,param_id:char:16,param_value:char:128,param_type:uint8_t"],[324,"PARAM_EXT_ACK",132,"param_id:char:16,param_value:char:128,param_type:uint8_t,param_result:uint8_t"],[330,"OBSTACLE_DISTANCE",23,"time_usec:uint64_t,distances:uint16_t:72,min_distance:uint16_t,max_distance:uint16_t,sensor_type:uint8_t,increment:uint8_t,increment_f:float,angle_offset:float,frame:uint8_t"],[331,"ODOMETRY",91,"time_usec:uint64_t,x:float,y:float,z:float,q:float:4,vx:float,vy:float,vz:float,rollspeed:float,pitchspeed:float,yawspeed:float,pose_covariance:float:21,velocity_covariance:float:21,frame_id:uint8_t,child_frame_id:uint8_t,reset_counter:uint8_t,estimator_type:uint8_t,quality:int8_t"],[332,"TRAJECTORY_REPRESENTATION_WAYPOINTS",236,"time_usec:uint64_t,pos_x:float:5,pos_y:float:5,pos_z:float:5,vel_x:float:5,vel_y:float:5,vel_z:float:5,acc_x:float:5,acc_y:float:5,acc_z:float:5,pos_yaw:float:5,vel_yaw:float:5,command:uint16_t:5,valid_points:uint8_t"],[333,"TRAJECTORY_REPRESENTATION_BEZIER",231,"time_usec:uint64_t,pos_x:float:5,pos_y:float:5,pos_z:float:5,delta:float:5,pos_yaw:float:5,valid_points:uint8_t"],[335,"ISBD_LINK_STATUS",225,"timestamp:uint64_t,last_heartbeat:uint64_t,failed_sessions:uint16_t,successful_sessions:uint16_t,signal_quality:uint8_t,ring_pending:uint8_t,tx_session_pending:uint8_t,rx_session_pending:uint8_t"],[339,"RAW_RPM",199,"frequency:float,index:uint8_t"],[340,"UTM_GLOBAL_POSITION",99,"time:uint64_t,lat:int32_t,lon:int32_t,alt:int32_t,relative_alt:int32_t,next_lat:int32_t,next_lon:int32_t,next_alt:int32_t,vx:int16_t,vy:int16_t,vz:int16_t,h_acc:uint16_t,v_acc:uint16_t,vel_acc:uint16_t,update_rate:uint16_t,uas_id:uint8_t:18,flight_state:uint8_t,flags:uint8_t"],[345,"PARAM_ERROR",209,"param_index:int16_t,target_system:uint8_t,target_component:uint8_t,param_id:char:16,error:uint8_t"],[350,"DEBUG_FLOAT_ARRAY",232,"time_usec:uint64_t,array_id:uint16_t,name:char:10,data:float:58"],[360,"ORBIT_EXECUTION_STATUS",11,"time_usec:uint64_t,radius:float,x:int32_t,y:int32_t,z:float,frame:uint8_t"],[370,"SMART_BATTERY_INFO",75,"capacity_full_specification:int32_t,capacity_full:int32_t,cycle_count:uint16_t,weight:uint16_t,discharge_minimum_voltage:uint16_t,charging_minimum_voltage:uint16_t,resting_minimum_voltage:uint16_t,id:uint8_t,battery_function:uint8_t,type:uint8_t,serial_number:char:16,device_name:char:50,charging_maximum_voltage:uint16_t,cells_in_series:uint8_t,discharge_maximum_current:uint32_t,discharge_maximum_burst_current:uint32_t,manufacture_date:char:11"],[373,"GENERATOR_STATUS",117,"status:uint64_t,battery_current:float,load_current:float,power_generated:float,bus_voltage:float,bat_current_setpoint:float,runtime:uint32_t,time_until_maintenance:int32_t,generator_speed:uint16_t,rectifier_temperature:int16_t,generator_temperature:int16_t"],[375,"ACTUATOR_OUTPUT_STATUS",251,"time_usec:uint64_t,active:uint32_t,actuator:float:32"],[376,"RELAY_STATUS",199,"time_boot_ms:uint32_t,on:uint16_t,present:uint16_t"],[385,"TUNNEL",147,"payload_type:uint16_t,target_system:uint8_t,target_component:uint8_t,payload_length:uint8_t,payload:uint8_t:128"],[386,"CAN_FRAME",132,"id:uint32_t,target_system:uint8_t,target_component:uint8_t,bus:uint8_t,len:uint8_t,data:uint8_t:8"],[387,"CANFD_FRAME",4,"id:uint32_t,target_system:uint8_t,target_component:uint8_t,bus:uint8_t,len:uint8_t,data:uint8_t:64"],[388,"CAN_FILTER_MODIFY",8,"ids:uint16_t:16,target_system:uint8_t,target_component:uint8_t,bus:uint8_t,operation:uint8_t,num_ids:uint8_t"],[390,"ONBOARD_COMPUTER_STATUS",156,"time_usec:uint64_t,uptime:uint32_t,ram_usage:uint32_t,ram_total:uint32_t,storage_type:uint32_t:4,storage_usage:uint32_t:4,storage_total:uint32_t:4,link_type:uint32_t:6,link_tx_rate:uint32_t:6,link_rx_rate:uint32_t:6,link_tx_max:uint32_t:6,link_rx_max:uint32_t:6,fan_speed:int16_t:4,type:uint8_t,cpu_cores:uint8_t:8,cpu_combined:uint8_t:10,gpu_cores:uint8_t:4,gpu_combined:uint8_t:10,temperature_board:int8_t,temperature_core:int8_t:8,status_flags:uint16_t"],[9000,"WHEEL_DISTANCE",113,"time_usec:uint64_t,distance:double:16,count:uint8_t"],[9005,"WINCH_STATUS",117,"time_usec:uint64_t,line_length:float,speed:float,tension:float,voltage:float,current:float,status:uint32_t,temperature:int16_t"],[10001,"UAVIONIX_ADSB_OUT_CFG",209,"ICAO:uint32_t,stallSpeed:uint16_t,callsign:char:9,emitterType:uint8_t,aircraftSize:uint8_t,gpsOffsetLat:uint8_t,gpsOffsetLon:uint8_t,rfSelect:uint8_t"],[10002,"UAVIONIX_ADSB_OUT_DYNAMIC",186,"utcTime:uint32_t,gpsLat:int32_t,gpsLon:int32_t,gpsAlt:int32_t,baroAltMSL:int32_t,accuracyHor:uint32_t,accuracyVert:uint16_t,accuracyVel:uint16_t,velVert:int16_t,velNS:int16_t,VelEW:int16_t,state:uint16_t,squawk:uint16_t,gpsFix:uint8_t,numSats:uint8_t,emergencyStatus:uint8_t"],[10003,"UAVIONIX_ADSB_TRANSCEIVER_HEALTH_REPORT",4,"rfHealth:uint8_t"],[10004,"UAVIONIX_ADSB_OUT_CFG_REGISTRATION",133,"registration:char:9"],[10005,"UAVIONIX_ADSB_OUT_CFG_FLIGHTID",103,"flight_id:char:9"],[10006,"UAVIONIX_ADSB_GET",193,"ReqMessageId:uint32_t"],[10007,"UAVIONIX_ADSB_OUT_CONTROL",71,"baroAltMSL:int32_t,squawk:uint16_t,state:uint8_t,emergencyStatus:uint8_t,flight_id:char:8,x_bit:uint8_t"],[10008,"UAVIONIX_ADSB_OUT_STATUS",240,"squawk:uint16_t,state:uint8_t,NIC_NACp:uint8_t,boardTemp:uint8_t,fault:uint8_t,flight_id:char:8"],[10151,"LOWEHEISER_GOV_EFI",195,"volt_batt:float,curr_batt:float,curr_gen:float,curr_rot:float,fuel_level:float,throttle:float,runtime:uint32_t,until_maintenance:int32_t,rectifier_temp:float,generator_temp:float,efi_batt:float,efi_rpm:float,efi_pw:float,efi_fuel_flow:float,efi_fuel_consumed:float,efi_baro:float,efi_mat:float,efi_clt:float,efi_tps:float,efi_exhaust_gas_temperature:float,generator_status:uint16_t,efi_status:uint16_t,efi_index:uint8_t"],[11000,"DEVICE_OP_READ",134,"request_id:uint32_t,target_system:uint8_t,target_component:uint8_t,bustype:uint8_t,bus:uint8_t,address:uint8_t,busname:char:40,regstart:uint8_t,count:uint8_t,bank:uint8_t"],[11001,"DEVICE_OP_READ_REPLY",15,"request_id:uint32_t,result:uint8_t,regstart:uint8_t,count:uint8_t,data:uint8_t:128,bank:uint8_t"],[11002,"DEVICE_OP_WRITE",234,"request_id:uint32_t,target_system:uint8_t,target_component:uint8_t,bustype:uint8_t,bus:uint8_t,address:uint8_t,busname:char:40,regstart:uint8_t,count:uint8_t,data:uint8_t:128,bank:uint8_t"],[11003,"DEVICE_OP_WRITE_REPLY",64,"request_id:uint32_t,result:uint8_t"],[11004,"SECURE_COMMAND",11,"sequence:uint32_t,operation:uint32_t,target_system:uint8_t,target_component:uint8_t,data_length:uint8_t,sig_length:uint8_t,data:uint8_t:220"],[11005,"SECURE_COMMAND_REPLY",93,"sequence:uint32_t,operation:uint32_t,result:uint8_t,data_length:uint8_t,data:uint8_t:220"],[11010,"ADAP_TUNING",46,"desired:float,achieved:float,error:float,theta:float,omega:float,sigma:float,theta_dot:float,omega_dot:float,sigma_dot:float,f:float,f_dot:float,u:float,axis:uint8_t"],[11011,"VISION_POSITION_DELTA",106,"time_usec:uint64_t,time_delta_usec:uint64_t,angle_delta:float:3,position_delta:float:3,confidence:float"],[11020,"AOA_SSA",205,"time_usec:uint64_t,AOA:float,SSA:float"],[11030,"ESC_TELEMETRY_1_TO_4",144,"voltage:uint16_t:4,current:uint16_t:4,totalcurrent:uint16_t:4,rpm:uint16_t:4,count:uint16_t:4,temperature:uint8_t:4"],[11031,"ESC_TELEMETRY_5_TO_8",133,"voltage:uint16_t:4,current:uint16_t:4,totalcurrent:uint16_t:4,rpm:uint16_t:4,count:uint16_t:4,temperature:uint8_t:4"],[11032,"ESC_TELEMETRY_9_TO_12",85,"voltage:uint16_t:4,current:uint16_t:4,totalcurrent:uint16_t:4,rpm:uint16_t:4,count:uint16_t:4,temperature:uint8_t:4"],[11033,"OSD_PARAM_CONFIG",195,"request_id:uint32_t,min_value:float,max_value:float,increment:float,target_system:uint8_t,target_component:uint8_t,osd_screen:uint8_t,osd_index:uint8_t,param_id:char:16,config_type:uint8_t"],[11034,"OSD_PARAM_CONFIG_REPLY",79,"request_id:uint32_t,result:uint8_t"],[11035,"OSD_PARAM_SHOW_CONFIG",128,"request_id:uint32_t,target_system:uint8_t,target_component:uint8_t,osd_screen:uint8_t,osd_index:uint8_t"],[11036,"OSD_PARAM_SHOW_CONFIG_REPLY",177,"request_id:uint32_t,min_value:float,max_value:float,increment:float,result:uint8_t,param_id:char:16,config_type:uint8_t"],[11037,"OBSTACLE_DISTANCE_3D",130,"time_boot_ms:uint32_t,x:float,y:float,z:float,min_distance:float,max_distance:float,obstacle_id:uint16_t,sensor_type:uint8_t,frame:uint8_t"],[11038,"WATER_DEPTH",47,"time_boot_ms:uint32_t,lat:int32_t,lng:int32_t,alt:float,roll:float,pitch:float,yaw:float,distance:float,temperature:float,id:uint8_t,healthy:uint8_t"],[11039,"MCU_STATUS",142,"MCU_temperature:int16_t,MCU_voltage:uint16_t,MCU_voltage_min:uint16_t,MCU_voltage_max:uint16_t,id:uint8_t"],[11040,"ESC_TELEMETRY_13_TO_16",132,"voltage:uint16_t:4,current:uint16_t:4,totalcurrent:uint16_t:4,rpm:uint16_t:4,count:uint16_t:4,temperature:uint8_t:4"],[11041,"ESC_TELEMETRY_17_TO_20",208,"voltage:uint16_t:4,current:uint16_t:4,totalcurrent:uint16_t:4,rpm:uint16_t:4,count:uint16_t:4,temperature:uint8_t:4"],[11042,"ESC_TELEMETRY_21_TO_24",201,"voltage:uint16_t:4,current:uint16_t:4,totalcurrent:uint16_t:4,rpm:uint16_t:4,count:uint16_t:4,temperature:uint8_t:4"],[11043,"ESC_TELEMETRY_25_TO_28",193,"voltage:uint16_t:4,current:uint16_t:4,totalcurrent:uint16_t:4,rpm:uint16_t:4,count:uint16_t:4,temperature:uint8_t:4"],[11044,"ESC_TELEMETRY_29_TO_32",189,"voltage:uint16_t:4,current:uint16_t:4,totalcurrent:uint16_t:4,rpm:uint16_t:4,count:uint16_t:4,temperature:uint8_t:4"],[11060,"NAMED_VALUE_STRING",162,"time_boot_ms:uint32_t,name:char:10,value:char:64"],[12900,"OPEN_DRONE_ID_BASIC_ID",114,"target_system:uint8_t,target_component:uint8_t,id_or_mac:uint8_t:20,id_type:uint8_t,ua_type:uint8_t,uas_id:uint8_t:20"],[12901,"OPEN_DRONE_ID_LOCATION",254,"latitude:int32_t,longitude:int32_t,altitude_barometric:float,altitude_geodetic:float,height:float,timestamp:float,direction:uint16_t,speed_horizontal:uint16_t,speed_vertical:int16_t,target_system:uint8_t,target_component:uint8_t,id_or_mac:uint8_t:20,status:uint8_t,height_reference:uint8_t,horizontal_accuracy:uint8_t,vertical_accuracy:uint8_t,barometer_accuracy:uint8_t,speed_accuracy:uint8_t,timestamp_accuracy:uint8_t"],[12902,"OPEN_DRONE_ID_AUTHENTICATION",140,"timestamp:uint32_t,target_system:uint8_t,target_component:uint8_t,id_or_mac:uint8_t:20,authentication_type:uint8_t,data_page:uint8_t,last_page_index:uint8_t,length:uint8_t,authentication_data:uint8_t:23"],[12903,"OPEN_DRONE_ID_SELF_ID",249,"target_system:uint8_t,target_component:uint8_t,id_or_mac:uint8_t:20,description_type:uint8_t,description:char:23"],[12904,"OPEN_DRONE_ID_SYSTEM",77,"operator_latitude:int32_t,operator_longitude:int32_t,area_ceiling:float,area_floor:float,operator_altitude_geo:float,timestamp:uint32_t,area_count:uint16_t,area_radius:uint16_t,target_system:uint8_t,target_component:uint8_t,id_or_mac:uint8_t:20,operator_location_type:uint8_t,classification_type:uint8_t,category_eu:uint8_t,class_eu:uint8_t"],[12905,"OPEN_DRONE_ID_OPERATOR_ID",49,"target_system:uint8_t,target_component:uint8_t,id_or_mac:uint8_t:20,operator_id_type:uint8_t,operator_id:char:20"],[12915,"OPEN_DRONE_ID_MESSAGE_PACK",94,"target_system:uint8_t,target_component:uint8_t,id_or_mac:uint8_t:20,single_message_size:uint8_t,msg_pack_size:uint8_t,messages:uint8_t:225"],[12918,"OPEN_DRONE_ID_ARM_STATUS",139,"status:uint8_t,error:char:50"],[12919,"OPEN_DRONE_ID_SYSTEM_UPDATE",7,"operator_latitude:int32_t,operator_longitude:int32_t,operator_altitude_geo:float,timestamp:uint32_t,target_system:uint8_t,target_component:uint8_t"],[12920,"HYGROMETER_SENSOR",20,"temperature:int16_t,humidity:uint16_t,id:uint8_t"],[42000,"ICAROUS_HEARTBEAT",227,"status:uint8_t"],[42001,"ICAROUS_KINEMATIC_BANDS",239,"min1:float,max1:float,min2:float,max2:float,min3:float,max3:float,min4:float,max4:float,min5:float,max5:float,numBands:int8_t,type1:uint8_t,type2:uint8_t,type3:uint8_t,type4:uint8_t,type5:uint8_t"],[50001,"CUBEPILOT_RAW_RC",246,"rc_raw:uint8_t:32"],[50002,"HERELINK_VIDEO_STREAM_INFORMATION",181,"framerate:float,bitrate:uint32_t,resolution_h:uint16_t,resolution_v:uint16_t,rotation:uint16_t,camera_id:uint8_t,status:uint8_t,uri:char:230"],[50003,"HERELINK_TELEM",62,"rf_freq:uint32_t,link_bw:uint32_t,link_rate:uint32_t,snr:int16_t,cpu_temp:int16_t,board_temp:int16_t,rssi:uint8_t"],[50004,"CUBEPILOT_FIRMWARE_UPDATE_START",240,"size:uint32_t,crc:uint32_t,target_system:uint8_t,target_component:uint8_t"],[50005,"CUBEPILOT_FIRMWARE_UPDATE_RESP",152,"offset:uint32_t,target_system:uint8_t,target_component:uint8_t"],[52000,"AIRLINK_AUTH",13,"login:char:50,password:char:50"],[52001,"AIRLINK_AUTH_RESPONSE",239,"resp_type:uint8_t"]],"enums":{"MAV_TYPE":{"0":"Generic","1":"Fixed Wing","2":"Quadrotor","3":"Coaxial","4":"Helicopter","5":"Antenna Tracker","6":"Gcs","7":"Airship","8":"Free Balloon","9":"Rocket","10":"Ground Rover","11":"Surface Boat","12":"Submarine","13":"Hexarotor","14":"Octorotor","15":"Tricopter","16":"Flapping Wing","17":"Kite","18":"Onboard Controller","19":"Vtol Duorotor","20":"Vtol Quadrotor","21":"Vtol Tiltrotor","22":"Vtol Reserved2","23":"Vtol Reserved3","24":"Vtol Reserved4","25":"Vtol Reserved5","26":"Gimbal","27":"Adsb","28":"Parafoil","29":"Dodecarotor","30":"Camera","31":"Charging Station","32":"Flarm","33":"Servo","34":"Odid","35":"Decarotor","36":"Battery","37":"Parachute","38":"Log","39":"Osd","40":"Imu","41":"Gps","42":"Winch","43":"Generic Multirotor","44":"Illuminator","45":"Spacecraft Orbiter","46":"Ground Quadruped","47":"Vtol Gyrodyne","48":"Gripper"},"MAV_STATE":{"0":"Uninit","1":"Boot","2":"Calibrating","3":"Standby","4":"Active","5":"Critical","6":"Emergency","7":"Poweroff","8":"Flight Termination"},"MAV_SEVERITY":{"0":"Emergency","1":"Alert","2":"Critical","3":"Error","4":"Warning","5":"Notice","6":"Info","7":"Debug"},"MAV_AUTOPILOT":{"0":"Generic","1":"Reserved","2":"Slugs","3":"Ardupilotmega","4":"Openpilot","5":"Generic Waypoints Only","6":"Generic Waypoints And Simple Navigation Only","7":"Generic Mission Full","8":"Invalid","9":"Ppz","10":"Udb","11":"Fp","12":"Px4","13":"Smaccmpilot","14":"Autoquad","15":"Armazila","16":"Aerob","17":"Asluav","18":"Smartap","19":"Airrails","20":"Reflex"}},"modes":{"1":{"0":"MANUAL","1":"CIRCLE","2":"STABILIZE","3":"TRAINING","4":"ACRO","5":"FBWA","6":"FBWB","7":"CRUISE","8":"AUTOTUNE","10":"AUTO","11":"RTL","12":"LOITER","13":"TAKEOFF","14":"AVOID_ADSB","15":"GUIDED","16":"INITIALISING","17":"QSTABILIZE","18":"QHOVER","19":"QLOITER","20":"QLAND","21":"QRTL","22":"QAUTOTUNE","23":"QACRO","24":"THERMAL","25":"LOITERALTQLAND","26":"AUTOLAND"},"2":{"0":"STABILIZE","1":"ACRO","2":"ALT_HOLD","3":"AUTO","4":"GUIDED","5":"LOITER","6":"RTL","7":"CIRCLE","8":"POSITION","9":"LAND","10":"OF_LOITER","11":"DRIFT","13":"SPORT","14":"FLIP","15":"AUTOTUNE","16":"POSHOLD","17":"BRAKE","18":"THROW","19":"AVOID_ADSB","20":"GUIDED_NOGPS","21":"SMART_RTL","22":"FLOWHOLD","23":"FOLLOW","24":"ZIGZAG","25":"SYSTEMID","26":"AUTOROTATE","27":"AUTO_RTL","28":"TURTLE","29":"RATE_ACRO"},"3":{"0":"STABILIZE","1":"ACRO","2":"ALT_HOLD","3":"AUTO","4":"GUIDED","5":"LOITER","6":"RTL","7":"CIRCLE","8":"POSITION","9":"LAND","10":"OF_LOITER","11":"DRIFT","13":"SPORT","14":"FLIP","15":"AUTOTUNE","16":"POSHOLD","17":"BRAKE","18":"THROW","19":"AVOID_ADSB","20":"GUIDED_NOGPS","21":"SMART_RTL","22":"FLOWHOLD","23":"FOLLOW","24":"ZIGZAG","25":"SYSTEMID","26":"AUTOROTATE","27":"AUTO_RTL","28":"TURTLE","29":"RATE_ACRO"},"4":{"0":"STABILIZE","1":"ACRO","2":"ALT_HOLD","3":"AUTO","4":"GUIDED","5":"LOITER","6":"RTL","7":"CIRCLE","8":"POSITION","9":"LAND","10":"OF_LOITER","11":"DRIFT","13":"SPORT","14":"FLIP","15":"AUTOTUNE","16":"POSHOLD","17":"BRAKE","18":"THROW","19":"AVOID_ADSB","20":"GUIDED_NOGPS","21":"SMART_RTL","22":"FLOWHOLD","23":"FOLLOW","24":"ZIGZAG","25":"SYSTEMID","26":"AUTOROTATE","27":"AUTO_RTL","28":"TURTLE","29":"RATE_ACRO"},"5":{"0":"MANUAL","1":"STOP","2":"SCAN","4":"GUIDED","10":"AUTO","16":"INITIALISING"},"7":{"0":"LAND","1":"MANUAL","2":"VELOCITY","3":"LOITER","4":"RTL","5":"AUTO","6":"HOLD"},"10":{"0":"MANUAL","1":"ACRO","2":"LEARNING","3":"STEERING","4":"HOLD","5":"LOITER","6":"FOLLOW","7":"SIMPLE","8":"DOCK","9":"CIRCLE","10":"AUTO","11":"RTL","12":"SMART_RTL","15":"GUIDED","16":"INITIALISING"},"11":{"0":"MANUAL","1":"ACRO","2":"LEARNING","3":"STEERING","4":"HOLD","5":"LOITER","6":"FOLLOW","7":"SIMPLE","8":"DOCK","9":"CIRCLE","10":"AUTO","11":"RTL","12":"SMART_RTL","15":"GUIDED","16":"INITIALISING"},"12":{"0":"STABILIZE","1":"ACRO","2":"ALT_HOLD","3":"AUTO","4":"GUIDED","7":"CIRCLE","9":"SURFACE","16":"POSHOLD","19":"MANUAL"},"13":{"0":"STABILIZE","1":"ACRO","2":"ALT_HOLD","3":"AUTO","4":"GUIDED","5":"LOITER","6":"RTL","7":"CIRCLE","8":"POSITION","9":"LAND","10":"OF_LOITER","11":"DRIFT","13":"SPORT","14":"FLIP","15":"AUTOTUNE","16":"POSHOLD","17":"BRAKE","18":"THROW","19":"AVOID_ADSB","20":"GUIDED_NOGPS","21":"SMART_RTL","22":"FLOWHOLD","23":"FOLLOW","24":"ZIGZAG","25":"SYSTEMID","26":"AUTOROTATE","27":"AUTO_RTL","28":"TURTLE","29":"RATE_ACRO"},"14":{"0":"STABILIZE","1":"ACRO","2":"ALT_HOLD","3":"AUTO","4":"GUIDED","5":"LOITER","6":"RTL","7":"CIRCLE","8":"POSITION","9":"LAND","10":"OF_LOITER","11":"DRIFT","13":"SPORT","14":"FLIP","15":"AUTOTUNE","16":"POSHOLD","17":"BRAKE","18":"THROW","19":"AVOID_ADSB","20":"GUIDED_NOGPS","21":"SMART_RTL","22":"FLOWHOLD","23":"FOLLOW","24":"ZIGZAG","25":"SYSTEMID","26":"AUTOROTATE","27":"AUTO_RTL","28":"TURTLE","29":"RATE_ACRO"},"15":{"0":"STABILIZE","1":"ACRO","2":"ALT_HOLD","3":"AUTO","4":"GUIDED","5":"LOITER","6":"RTL","7":"CIRCLE","8":"POSITION","9":"LAND","10":"OF_LOITER","11":"DRIFT","13":"SPORT","14":"FLIP","15":"AUTOTUNE","16":"POSHOLD","17":"BRAKE","18":"THROW","19":"AVOID_ADSB","20":"GUIDED_NOGPS","21":"SMART_RTL","22":"FLOWHOLD","23":"FOLLOW","24":"ZIGZAG","25":"SYSTEMID","26":"AUTOROTATE","27":"AUTO_RTL","28":"TURTLE","29":"RATE_ACRO"},"19":{"0":"MANUAL","1":"CIRCLE","2":"STABILIZE","3":"TRAINING","4":"ACRO","5":"FBWA","6":"FBWB","7":"CRUISE","8":"AUTOTUNE","10":"AUTO","11":"RTL","12":"LOITER","13":"TAKEOFF","14":"AVOID_ADSB","15":"GUIDED","16":"INITIALISING","17":"QSTABILIZE","18":"QHOVER","19":"QLOITER","20":"QLAND","21":"QRTL","22":"QAUTOTUNE","23":"QACRO","24":"THERMAL","25":"LOITERALTQLAND","26":"AUTOLAND"},"20":{"0":"MANUAL","1":"CIRCLE","2":"STABILIZE","3":"TRAINING","4":"ACRO","5":"FBWA","6":"FBWB","7":"CRUISE","8":"AUTOTUNE","10":"AUTO","11":"RTL","12":"LOITER","13":"TAKEOFF","14":"AVOID_ADSB","15":"GUIDED","16":"INITIALISING","17":"QSTABILIZE","18":"QHOVER","19":"QLOITER","20":"QLAND","21":"QRTL","22":"QAUTOTUNE","23":"QACRO","24":"THERMAL","25":"LOITERALTQLAND","26":"AUTOLAND"},"21":{"0":"MANUAL","1":"CIRCLE","2":"STABILIZE","3":"TRAINING","4":"ACRO","5":"FBWA","6":"FBWB","7":"CRUISE","8":"AUTOTUNE","10":"AUTO","11":"RTL","12":"LOITER","13":"TAKEOFF","14":"AVOID_ADSB","15":"GUIDED","16":"INITIALISING","17":"QSTABILIZE","18":"QHOVER","19":"QLOITER","20":"QLAND","21":"QRTL","22":"QAUTOTUNE","23":"QACRO","24":"THERMAL","25":"LOITERALTQLAND","26":"AUTOLAND"},"29":{"0":"STABILIZE","1":"ACRO","2":"ALT_HOLD","3":"AUTO","4":"GUIDED","5":"LOITER","6":"RTL","7":"CIRCLE","8":"POSITION","9":"LAND","10":"OF_LOITER","11":"DRIFT","13":"SPORT","14":"FLIP","15":"AUTOTUNE","16":"POSHOLD","17":"BRAKE","18":"THROW","19":"AVOID_ADSB","20":"GUIDED_NOGPS","21":"SMART_RTL","22":"FLOWHOLD","23":"FOLLOW","24":"ZIGZAG","25":"SYSTEMID","26":"AUTOROTATE","27":"AUTO_RTL","28":"TURTLE","29":"RATE_ACRO"},"35":{"0":"STABILIZE","1":"ACRO","2":"ALT_HOLD","3":"AUTO","4":"GUIDED","5":"LOITER","6":"RTL","7":"CIRCLE","8":"POSITION","9":"LAND","10":"OF_LOITER","11":"DRIFT","13":"SPORT","14":"FLIP","15":"AUTOTUNE","16":"POSHOLD","17":"BRAKE","18":"THROW","19":"AVOID_ADSB","20":"GUIDED_NOGPS","21":"SMART_RTL","22":"FLOWHOLD","23":"FOLLOW","24":"ZIGZAG","25":"SYSTEMID","26":"AUTOROTATE","27":"AUTO_RTL","28":"TURTLE","29":"RATE_ACRO"}},"consts":{"MAVLINK_MSG_ID_AUTOPILOT_VERSION":148,"MAVLINK_MSG_ID_AUTOPILOT_VERSION_REQUEST":183,"MAV_AUTOPILOT_AEROB":16,"MAV_AUTOPILOT_AIRRAILS":19,"MAV_AUTOPILOT_ARDUPILOTMEGA":3,"MAV_AUTOPILOT_ARMAZILA":15,"MAV_AUTOPILOT_ASLUAV":17,"MAV_AUTOPILOT_AUTOQUAD":14,"MAV_AUTOPILOT_ENUM_END":21,"MAV_AUTOPILOT_FP":11,"MAV_AUTOPILOT_GENERIC":0,"MAV_AUTOPILOT_GENERIC_MISSION_FULL":7,"MAV_AUTOPILOT_GENERIC_WAYPOINTS_AND_SIMPLE_NAVIGATION_ONLY":6,"MAV_AUTOPILOT_GENERIC_WAYPOINTS_ONLY":5,"MAV_AUTOPILOT_INVALID":8,"MAV_AUTOPILOT_OPENPILOT":4,"MAV_AUTOPILOT_PPZ":9,"MAV_AUTOPILOT_PX4":12,"MAV_AUTOPILOT_REFLEX":20,"MAV_AUTOPILOT_RESERVED":1,"MAV_AUTOPILOT_SLUGS":2,"MAV_AUTOPILOT_SMACCMPILOT":13,"MAV_AUTOPILOT_SMARTAP":18,"MAV_AUTOPILOT_UDB":10,"MAV_CMD_DO_SEND_BANNER":42428,"MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN":246,"MAV_CMD_REQUEST_MESSAGE":512,"MAV_DATA_STREAM_ALL":0,"MAV_MODE_FLAG_AUTO_ENABLED":4,"MAV_MODE_FLAG_CUSTOM_MODE_ENABLED":1,"MAV_MODE_FLAG_DECODE_POSITION_AUTO":4,"MAV_MODE_FLAG_DECODE_POSITION_CUSTOM_MODE":1,"MAV_MODE_FLAG_DECODE_POSITION_ENUM_END":129,"MAV_MODE_FLAG_DECODE_POSITION_GUIDED":8,"MAV_MODE_FLAG_DECODE_POSITION_HIL":32,"MAV_MODE_FLAG_DECODE_POSITION_MANUAL":64,"MAV_MODE_FLAG_DECODE_POSITION_SAFETY":128,"MAV_MODE_FLAG_DECODE_POSITION_STABILIZE":16,"MAV_MODE_FLAG_DECODE_POSITION_TEST":2,"MAV_MODE_FLAG_ENUM_END":129,"MAV_MODE_FLAG_GUIDED_ENABLED":8,"MAV_MODE_FLAG_HIL_ENABLED":32,"MAV_MODE_FLAG_MANUAL_INPUT_ENABLED":64,"MAV_MODE_FLAG_SAFETY_ARMED":128,"MAV_MODE_FLAG_STABILIZE_ENABLED":16,"MAV_MODE_FLAG_TEST_ENABLED":2,"MAV_PARAM_TYPE_ENUM_END":11,"MAV_PARAM_TYPE_INT16":4,"MAV_PARAM_TYPE_INT32":6,"MAV_PARAM_TYPE_INT64":8,"MAV_PARAM_TYPE_INT8":2,"MAV_PARAM_TYPE_REAL32":9,"MAV_PARAM_TYPE_REAL64":10,"MAV_PARAM_TYPE_UINT16":3,"MAV_PARAM_TYPE_UINT32":5,"MAV_PARAM_TYPE_UINT64":7,"MAV_PARAM_TYPE_UINT8":1,"MAV_POWER_STATUS_BRICK_VALID":1,"MAV_POWER_STATUS_CHANGED":32,"MAV_POWER_STATUS_ENUM_END":33,"MAV_POWER_STATUS_PERIPH_HIPOWER_OVERCURRENT":16,"MAV_POWER_STATUS_PERIPH_OVERCURRENT":8,"MAV_POWER_STATUS_SERVO_VALID":2,"MAV_POWER_STATUS_USB_CONNECTED":4,"MAV_SEVERITY_ALERT":1,"MAV_SEVERITY_CRITICAL":2,"MAV_SEVERITY_DEBUG":7,"MAV_SEVERITY_EMERGENCY":0,"MAV_SEVERITY_ENUM_END":8,"MAV_SEVERITY_ERROR":3,"MAV_SEVERITY_INFO":6,"MAV_SEVERITY_NOTICE":5,"MAV_SEVERITY_WARNING":4,"MAV_SYS_STATUS_AHRS":2097152,"MAV_SYS_STATUS_EXTENSION_USED":2147483648,"MAV_SYS_STATUS_GEOFENCE":1048576,"MAV_SYS_STATUS_LOGGING":16777216,"MAV_SYS_STATUS_OBSTACLE_AVOIDANCE":536870912,"MAV_SYS_STATUS_PREARM_CHECK":268435456,"MAV_SYS_STATUS_RECOVERY_SYSTEM":1,"MAV_SYS_STATUS_REVERSE_MOTOR":8388608,"MAV_SYS_STATUS_SENSOR_3D_ACCEL":2,"MAV_SYS_STATUS_SENSOR_3D_ACCEL2":262144,"MAV_SYS_STATUS_SENSOR_3D_GYRO":1,"MAV_SYS_STATUS_SENSOR_3D_GYRO2":131072,"MAV_SYS_STATUS_SENSOR_3D_MAG":4,"MAV_SYS_STATUS_SENSOR_3D_MAG2":524288,"MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE":8,"MAV_SYS_STATUS_SENSOR_ANGULAR_RATE_CONTROL":1024,"MAV_SYS_STATUS_SENSOR_ATTITUDE_STABILIZATION":2048,"MAV_SYS_STATUS_SENSOR_BATTERY":33554432,"MAV_SYS_STATUS_SENSOR_DIFFERENTIAL_PRESSURE":16,"MAV_SYS_STATUS_SENSOR_ENUM_END":2147483649,"MAV_SYS_STATUS_SENSOR_EXTENDED_ENUM_END":3,"MAV_SYS_STATUS_SENSOR_EXTERNAL_GROUND_TRUTH":512,"MAV_SYS_STATUS_SENSOR_GPS":32,"MAV_SYS_STATUS_SENSOR_LASER_POSITION":256,"MAV_SYS_STATUS_SENSOR_LEAK":2,"MAV_SYS_STATUS_SENSOR_MOTOR_OUTPUTS":32768,"MAV_SYS_STATUS_SENSOR_OPTICAL_FLOW":64,"MAV_SYS_STATUS_SENSOR_PROPULSION":1073741824,"MAV_SYS_STATUS_SENSOR_PROXIMITY":67108864,"MAV_SYS_STATUS_SENSOR_RC_RECEIVER":65536,"MAV_SYS_STATUS_SENSOR_SATCOM":134217728,"MAV_SYS_STATUS_SENSOR_VISION_POSITION":128,"MAV_SYS_STATUS_SENSOR_XY_POSITION_CONTROL":16384,"MAV_SYS_STATUS_SENSOR_YAW_POSITION":4096,"MAV_SYS_STATUS_SENSOR_Z_ALTITUDE_CONTROL":8192,"MAV_SYS_STATUS_TERRAIN":4194304,"MAV_TYPE_GCS":6}};
+
+// ---- configuration (kept in sync with board_test.py) -----------------------------------------
+
+const BAUD_RATES = [9600, 57600, 115200, 230400, 460800, 921600];
+const DEFAULT_BAUD = 57600;
+const REFRESH_MS = 250;
+const STALE_S = 2.0;
+const HEARTBEAT_TIMEOUT_S = 3.0;
+const PARAM_RETRY_MS = 2000;
+const PARAM_MAX_TRIES = 3;
+const STATUS_LOG_MAX = 1000;
+const PWM_MIN = 800, PWM_MAX = 2200;
+const MAG_FIELD_MIN = 185, MAG_FIELD_MAX = 875;  // ArduPilot compass arming check limits (mGauss)
+const CM5_SERIAL_PORT = 3;  // SERIAL3 = TELEM3 (USART2)
+const GCS_SYSID = 255, GCS_COMPID = 190;
+
+const COLOR = { text: '', muted: 'var(--muted)', ok: 'var(--ok)', warn: 'var(--warn)', err: 'var(--err)' };
+const K = DEFS.consts;
+
+const BUS_TYPES = { 0: 'Unknown', 1: 'I2C', 2: 'SPI', 3: 'DroneCAN', 4: 'SITL', 5: 'MSP', 6: 'Serial', 7: 'QSPI' };
+const IMU_CHIPS = {
+  0x09: 'BMI160', 0x10: 'L3G4200D', 0x11: 'LSM303D', 0x12: 'BMA180', 0x13: 'MPU6000',
+  0x16: 'MPU9250', 0x17: 'IIS328DQ', 0x18: 'LSM9DS1', 0x21: 'MPU6000', 0x22: 'L3GD20',
+  0x24: 'MPU9250', 0x25: 'I3G4250D', 0x26: 'LSM9DS1', 0x27: 'ICM20789', 0x28: 'ICM20689',
+  0x29: 'BMI055', 0x2A: 'SITL', 0x2B: 'BMI088', 0x2C: 'ICM20948', 0x2D: 'ICM20648',
+  0x2E: 'ICM20649', 0x2F: 'ICM20602', 0x30: 'ICM20601', 0x31: 'ADIS1647x', 0x32: 'Serial',
+  0x33: 'ICM40609', 0x34: 'ICM42688', 0x35: 'ICM42605', 0x36: 'ICM40605', 0x37: 'IIM42652',
+  0x38: 'BMI270', 0x39: 'BMI085', 0x3A: 'ICM42670', 0x3B: 'ICM45686', 0x3C: 'SCHA63T', 0x3D: 'IIM42653',
+};
+const MAG_CHIPS = {
+  0x01: 'HMC5883 (old)', 0x02: 'LSM303D', 0x04: 'AK8963', 0x05: 'BMM150', 0x06: 'LSM9DS1',
+  0x07: 'HMC5883', 0x08: 'LIS3MDL', 0x09: 'AK09916', 0x0A: 'IST8310', 0x0B: 'ICM20948',
+  0x0C: 'MMC3416', 0x0D: 'QMC5883L', 0x0E: 'MAG3110', 0x0F: 'SITL', 0x10: 'IST8308',
+  0x11: 'RM3100', 0x12: 'RM3100', 0x13: 'MMC5883', 0x14: 'AK09918', 0x15: 'AK09915',
+  0x16: 'QMC5883P', 0x17: 'BMM350', 0x18: 'IIS2MDC',
+};
+const BARO_CHIPS = {
+  0x01: 'SITL', 0x02: 'BMP085', 0x03: 'BMP280', 0x04: 'BMP388', 0x05: 'DPS280',
+  0x06: 'DPS310', 0x07: 'FBM320', 0x08: 'ICM20789', 0x09: 'KellerLD', 0x0A: 'LPS2XH',
+  0x0B: 'MS5611', 0x0C: 'SPL06', 0x0D: 'DroneCAN', 0x0E: 'MSP', 0x0F: 'ICP101XX',
+  0x10: 'ICP201XX', 0x11: 'MS5607', 0x12: 'MS5837', 0x13: 'MS5637', 0x14: 'BMP390',
+  0x15: 'BMP581', 0x16: 'SPA06', 0x17: 'AUAV',
+};
+const CHIP_TABLES = { accel: IMU_CHIPS, gyro: IMU_CHIPS, mag: MAG_CHIPS, baro: BARO_CHIPS };
+const GPS_TYPES = {
+  0: 'None', 1: 'Auto', 2: 'uBlox', 5: 'NMEA', 6: 'SiRF', 8: 'SwiftNav', 9: 'DroneCAN',
+  10: 'SBF', 11: 'GSOF', 13: 'ERB', 14: 'MAVLink', 15: 'NOVA', 16: 'Hemisphere NMEA',
+  17: 'uBlox MB Base', 18: 'uBlox MB Rover', 19: 'MSP', 20: 'AllyStar', 21: 'External AHRS',
+  22: 'DroneCAN MB Base', 23: 'DroneCAN MB Rover', 24: 'Unicore NMEA', 25: 'Unicore MB NMEA', 26: 'SBF Dual Antenna',
+};
+const GPS_FIX = { 0: 'No GPS', 1: 'No Fix', 2: '2D', 3: '3D', 4: 'DGPS', 5: 'RTK Float', 6: 'RTK Fixed', 7: 'Static', 8: 'PPP' };
+const SERIAL_BAUDS = { 1: 1200, 2: 2400, 4: 4800, 9: 9600, 19: 19200, 38: 38400, 57: 57600, 111: 111100, 115: 115200,
+  230: 230400, 256: 256000, 460: 460800, 500: 500000, 921: 921600, 1500: 1500000, 2000: 2000000 };
+const SERIAL_PROTOCOLS = { '-1': 'None', 1: 'MAVLink1', 2: 'MAVLink2', 5: 'GPS', 9: 'Rangefinder', 18: 'OpticalFlow',
+  23: 'RCIN', 28: 'Scripting', 32: 'MSP', 45: 'DDS/XRCE' };
+const SERIAL_PROTOCOL_GPS = 5;
+const AUTOPILOT_NAMES = { 3: 'ArduPilot', 12: 'PX4', 0: 'Generic' };
+const KIND_LABELS = { accel: 'Accelerometer', gyro: 'Gyroscope', mag: 'Compass', baro: 'Barometer', gps: 'GPS',
+  airspeed: 'Airspeed', range: 'Rangefinder', flow: 'Optical Flow', temp: 'IMU Temperature' };
+const IMU_PARTS = [['accel', 'Accelerometer'], ['gyro', 'Gyroscope'], ['temp', 'Temperature']];
+const INT_TYPES = new Set([K.MAV_PARAM_TYPE_INT8, K.MAV_PARAM_TYPE_INT16, K.MAV_PARAM_TYPE_INT32,
+  K.MAV_PARAM_TYPE_UINT8, K.MAV_PARAM_TYPE_UINT16, K.MAV_PARAM_TYPE_UINT32]);
+
+const AP_DEVICE_PARAMS = {
+  accel: ['INS_ACC_ID', 'INS_ACC2_ID', 'INS_ACC3_ID'], gyro: ['INS_GYR_ID', 'INS_GYR2_ID', 'INS_GYR3_ID'],
+  mag: ['COMPASS_DEV_ID', 'COMPASS_DEV_ID2', 'COMPASS_DEV_ID3'], baro: ['BARO1_DEVID', 'BARO2_DEVID', 'BARO3_DEVID'],
+};
+const PX4_DEVICE_PARAMS = {
+  accel: ['CAL_ACC0_ID', 'CAL_ACC1_ID', 'CAL_ACC2_ID'], gyro: ['CAL_GYRO0_ID', 'CAL_GYRO1_ID', 'CAL_GYRO2_ID'],
+  mag: ['CAL_MAG0_ID', 'CAL_MAG1_ID', 'CAL_MAG2_ID'], baro: ['CAL_BARO0_ID', 'CAL_BARO1_ID', 'CAL_BARO2_ID'],
+};
+const range = n => Array.from({ length: n }, (_, i) => i);
+const AP_EXTRA_PARAMS = ['GPS_TYPE', 'GPS_TYPE2', 'GPS1_TYPE', 'GPS2_TYPE', 'RNGFND1_TYPE', 'FLOW_TYPE', 'ARSPD_TYPE',
+  'BATT_MONITOR', 'BRD_IO_ENABLE',
+  ...range(8).map(i => `SERIAL${i + 1}_PROTOCOL`), ...range(8).map(i => `SERIAL${i + 1}_BAUD`)];
+
+// "{port}" is replaced by the selected SERIALn port; ['clear_bit', n] = current value with bit n cleared.
+const PERIPHERALS = [
+  { name: 'HFlow', iface: 'CAN', detect: 'hflow', note: 'Optical flow + rangefinder over DroneCAN on CAN1',
+    params: [['CAN_P1_DRIVER', 1], ['CAN_D1_PROTOCOL', 1], ['FLOW_TYPE', 6], ['RNGFND2_TYPE', 24], ['RNGFND2_ORIENT', 25]] },
+  { name: 'HMC5883 Compass', iface: 'I2C', detect: 'hmc5883', note: 'External I2C magnetometer',
+    params: [['COMPASS_ENABLE', 1], ['COMPASS_EXTERNAL', 1], ['COMPASS_TYPEMASK', ['clear_bit', 0]]] },
+  { name: 'TF-Luna Distance', iface: 'Serial', port: 4, detect: 'tfluna', note: 'Benewake protocol, 115200 baud, facing down',
+    params: [['SERIAL{port}_PROTOCOL', 9], ['SERIAL{port}_BAUD', 115], ['RNGFND1_TYPE', 20], ['RNGFND1_ORIENT', 25]] },
+  { name: 'Holybro PMW3901', iface: 'Serial', port: 5, detect: 'pmw3901', note: 'Serial optical flow (CXOF protocol, 19200 baud)',
+    params: [['SERIAL{port}_PROTOCOL', 18], ['SERIAL{port}_BAUD', 19], ['FLOW_TYPE', 4]] },
+  { name: 'MPU-9250/6500 Sensor Set', iface: 'I2C', detect: 'mpu9250', note: 'IMU is probed from hwdef; this enables its AK8963 compass',
+    params: [['COMPASS_TYPEMASK', ['clear_bit', 2]]] },
+];
+const NET_IP_PARAMS = range(4).map(i => `NET_IPADDR${i}`);
+const NET_GW_PARAMS = range(4).map(i => `NET_GWADDR${i}`);
+const NET_MAC_PARAMS = range(6).map(i => `NET_MACADDR${i}`);
+const NET_CONFIG_PARAMS = ['NET_ENABLE', 'NET_DHCP', 'NET_NETMASK', ...NET_IP_PARAMS, ...NET_GW_PARAMS];
+const NET_PARAMS = [...NET_CONFIG_PARAMS, ...NET_MAC_PARAMS];
+const AP_SETUP_PARAMS = [...PERIPHERALS.flatMap(p => p.params.map(([n]) => n).filter(n => !n.includes('{port}'))), ...NET_PARAMS];
+
+// ---- MAVLink codec ---------------------------------------------------------------------------
+
+const TYPE_SIZE = { int8_t: 1, uint8_t: 1, char: 1, int16_t: 2, uint16_t: 2, int32_t: 4, uint32_t: 4, float: 4,
+  int64_t: 8, uint64_t: 8, double: 8, uint8_t_mavlink_version: 1 };
+const MSG_BY_ID = new Map(), MSG_BY_NAME = new Map();
+for (const [id, name, crc, spec] of DEFS.messages) {
+  const fields = spec.split(',').map(f => { const [n, t, len] = f.split(':'); return [n, t, len ? +len : 0]; });
+  const def = { id, name, crc, fields, len: fields.reduce((s, [, t, n]) => s + TYPE_SIZE[t] * (n || 1), 0) };
+  MSG_BY_ID.set(id, def);
+  MSG_BY_NAME.set(name, def);
+}
+
+function crcAccumulate(byte, crc) {
+  let tmp = (byte ^ (crc & 0xff)) & 0xff;
+  tmp = (tmp ^ (tmp << 4)) & 0xff;
+  return ((crc >> 8) ^ (tmp << 8) ^ (tmp << 3) ^ (tmp >> 4)) & 0xffff;
+}
+
+function crcX25(bytes, start, end, extra) {
+  let crc = 0xffff;
+  for (let i = start; i < end; i++) crc = crcAccumulate(bytes[i], crc);
+  return crcAccumulate(extra, crc);
+}
+
+function readNum(dv, off, type) {
+  switch (type) {
+    case 'int8_t': return dv.getInt8(off);
+    case 'int16_t': return dv.getInt16(off, true);
+    case 'uint16_t': return dv.getUint16(off, true);
+    case 'int32_t': return dv.getInt32(off, true);
+    case 'uint32_t': return dv.getUint32(off, true);
+    case 'float': return dv.getFloat32(off, true);
+    case 'double': return dv.getFloat64(off, true);
+    case 'int64_t': return dv.getBigInt64(off, true);
+    case 'uint64_t': return dv.getBigUint64(off, true);
+    default: return dv.getUint8(off);
+  }
+}
+
+function writeNum(dv, off, type, v) {
+  switch (type) {
+    case 'int8_t': return dv.setInt8(off, v);
+    case 'int16_t': return dv.setInt16(off, v, true);
+    case 'uint16_t': return dv.setUint16(off, v, true);
+    case 'int32_t': return dv.setInt32(off, v, true);
+    case 'uint32_t': return dv.setUint32(off, v, true);
+    case 'float': return dv.setFloat32(off, v, true);
+    case 'double': return dv.setFloat64(off, v, true);
+    case 'int64_t': return dv.setBigInt64(off, BigInt(v), true);
+    case 'uint64_t': return dv.setBigUint64(off, BigInt(v), true);
+    default: return dv.setUint8(off, v);
+  }
+}
+
+const textDecoder = new TextDecoder(), textEncoder = new TextEncoder();
+
+function decodePayload(def, payload) {
+  const buf = new Uint8Array(def.len);  // MAVLink 2 trims trailing zeros, pad them back
+  buf.set(payload.subarray(0, def.len));
+  const dv = new DataView(buf.buffer);
+  const msg = { _name: def.name, _id: def.id };
+  let off = 0;
+  for (const [name, type, n] of def.fields) {
+    const size = TYPE_SIZE[type], count = n || 1;
+    if (type === 'char') {
+      const bytes = buf.subarray(off, off + count);
+      const end = bytes.indexOf(0);
+      msg[name] = textDecoder.decode(end < 0 ? bytes : bytes.subarray(0, end));
+    } else if (n) {
+      msg[name] = range(n).map(i => readNum(dv, off + i * size, type));
+    } else {
+      msg[name] = readNum(dv, off, type);
+    }
+    off += size * count;
+  }
+  return msg;
+}
+
+let txSeq = 0;
+function encodeMessage(name, values) {
+  const def = MSG_BY_NAME.get(name);
+  const buf = new Uint8Array(def.len);
+  const dv = new DataView(buf.buffer);
+  let off = 0;
+  for (const [fname, type, n] of def.fields) {
+    const size = TYPE_SIZE[type], count = n || 1, v = values[fname];
+    if (type === 'char') {
+      buf.set(textEncoder.encode(v || '').subarray(0, count), off);
+    } else {
+      for (let i = 0; i < count; i++) writeNum(dv, off + i * size, type, (Array.isArray(v) ? v[i] : i === 0 ? v : 0) || 0);
+    }
+    off += size * count;
+  }
+  let plen = def.len;
+  while (plen > 1 && buf[plen - 1] === 0) plen--;
+  const frame = new Uint8Array(10 + plen + 2);
+  frame.set([0xfd, plen, 0, 0, txSeq++ & 0xff, GCS_SYSID, GCS_COMPID, def.id & 0xff, (def.id >> 8) & 0xff, (def.id >> 16) & 0xff]);
+  frame.set(buf.subarray(0, plen), 10);
+  const crc = crcX25(frame, 1, 10 + plen, def.crc);
+  frame[10 + plen] = crc & 0xff;
+  frame[11 + plen] = crc >> 8;
+  return frame;
+}
+
+class MavParser {
+  constructor() { this.buf = new Uint8Array(0); }
+
+  push(chunk) {
+    const b = new Uint8Array(this.buf.length + chunk.length);
+    b.set(this.buf);
+    b.set(chunk, this.buf.length);
+    const out = [];
+    let i = 0;
+    while (i < b.length) {
+      const magic = b[i];
+      if (magic !== 0xfd && magic !== 0xfe) { i++; continue; }
+      if (i + 3 > b.length) break;
+      const v2 = magic === 0xfd, plen = b[i + 1], hdr = v2 ? 10 : 6;
+      const total = hdr + plen + 2 + (v2 && (b[i + 2] & 1) ? 13 : 0);
+      if (i + total > b.length) break;
+      const msgid = v2 ? b[i + 7] | (b[i + 8] << 8) | (b[i + 9] << 16) : b[i + 5];
+      const def = MSG_BY_ID.get(msgid);
+      const crc = b[i + hdr + plen] | (b[i + hdr + plen + 1] << 8);
+      if (!def || crcX25(b, i + 1, i + hdr + plen, def.crc) !== crc) { i++; continue; }  // resync
+      const msg = decodePayload(def, b.subarray(i + hdr, i + hdr + plen));
+      msg._sys = b[i + (v2 ? 5 : 3)];
+      msg._comp = b[i + (v2 ? 6 : 4)];
+      out.push(msg);
+      i += total;
+    }
+    this.buf = b.slice(i);
+    return out;
+  }
+}
+
+// ---- helpers ---------------------------------------------------------------------------------
+
+const $ = id => document.getElementById(id);
+const now = () => performance.now() / 1000;
+const deg = r => r * 180 / Math.PI;
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') node.className = v; else if (k === 'text') node.textContent = v; else node.setAttribute(k, v);
+  }
+  node.append(...children);
+  return node;
+}
+
+function setText(node, text, color = '') {
+  text = String(text);
+  if (node.textContent !== text) node.textContent = text;
+  if (node.style.color !== color) node.style.color = color;
+}
+
+// rows: arrays of cells { t: text, c: color, b: bold, cls: class }; reuses existing DOM nodes
+function syncRows(tbody, rows) {
+  while (tbody.rows.length > rows.length) tbody.deleteRow(-1);
+  rows.forEach((cells, i) => {
+    const tr = tbody.rows[i] || tbody.insertRow();
+    while (tr.cells.length < cells.length) tr.insertCell();
+    cells.forEach((cell, j) => {
+      const td = tr.cells[j];
+      const text = cell.t ?? '';
+      if (td.textContent !== text) { td.textContent = text; td.title = text; }
+      const cls = [cell.cls, cell.b ? 'bold' : ''].filter(Boolean).join(' ');
+      if (td.className !== cls) td.className = cls;
+      if (td.style.color !== (cell.c || '')) td.style.color = cell.c || '';
+    });
+  });
+}
+
+function xyz(x, y, z, unit, digits = 0) {
+  return `X ${x.toFixed(digits)}   Y ${y.toFixed(digits)}   Z ${z.toFixed(digits)}  ${unit}`;
+}
+
+function formatUptime(ms) {
+  const s = Math.floor(ms / 1000), p = n => String(n).padStart(2, '0');
+  return `${p(Math.floor(s / 3600))}:${p(Math.floor(s % 3600 / 60))}:${p(s % 60)}`;
+}
+
+const hex = (v, w) => '0x' + v.toString(16).toUpperCase().padStart(w, '0');
+const formatParam = (v, isInt) => isInt ? String(v) : String(parseFloat(v.toPrecision(7)));
+const enumName = (e, v) => DEFS.enums[e][v] ?? String(v);
+
+function decodeDeviceId(devId, kind, ardupilot) {
+  const busType = devId & 0x07, busNum = (devId >> 3) & 0x1f, address = (devId >> 8) & 0xff, devtype = (devId >> 16) & 0xff;
+  const bus = BUS_TYPES[busType] ?? `Bus ${busType}`;
+  const addr = [1, 2, 7].includes(busType) ? hex(address, 2) : busType === 3 ? `Node ${address}` : String(address);
+  const chip = ardupilot ? (CHIP_TABLES[kind] || {})[devtype] : undefined;
+  return { bus: `${bus} ${busNum}`, address: addr, chip: chip ? `${chip} (${hex(devtype, 2)})` : `Type ${hex(devtype, 2)}`, name: chip };
+}
+
+const f32 = new DataView(new ArrayBuffer(4));
+function floatBitsToInt(v) { f32.setFloat32(0, v, true); return f32.getInt32(0, true); }
+function intBitsToFloat(v) { f32.setInt32(0, v, true); return f32.getFloat32(0, true); }
+
+let notifyTimer = null;
+function notify(text, ms = 8000) {
+  $('statusbar').textContent = text;
+  clearTimeout(notifyTimer);
+  if (ms) notifyTimer = setTimeout(() => { $('statusbar').textContent = ''; }, ms);
+}
+
+// ---- state -----------------------------------------------------------------------------------
+
+let S;
+function resetState() {
+  S = {
+    target: null, autopilot: null, lastHeartbeat: 0, hb: null, version: {},
+    params: new Map(), paramTypes: new Map(), paramNames: [], paramTries: 0,
+    live: new Map(), magField: new Map(), values: new Map(), attitude: null, power: null, gps: new Map(),
+    sysStatus: null, powerStatus: null, mcu: null, hwstatus: null, iomcu: null, rc: null, servo: null,
+    log: [], logSeq: 0, logShown: null, netLoaded: false,
+  };
+}
+resetState();
+
+const conn = { port: null, reader: null, writer: null, readLoop: null, parser: null, closing: false, txChain: Promise.resolve() };
+const timers = { refresh: null, heartbeat: null, params: null };
+
+const isArduPilot = () => S.autopilot === K.MAV_AUTOPILOT_ARDUPILOTMEGA;
+const isPX4 = () => S.autopilot === K.MAV_AUTOPILOT_PX4;
+const liveKey = (kind, inst) => `${kind}:${inst}`;
+
+// ---- serial connection -----------------------------------------------------------------------
+
+async function connect() {
+  let port;
+  try {
+    port = await navigator.serial.requestPort();
+  } catch {
+    return;  // user closed the port chooser
+  }
+  try {
+    await port.open({ baudRate: +$('baud').value, bufferSize: 65536 });
+  } catch (e) {
+    notify(`Could not open port: ${e.message}`);
+    return;
+  }
+  resetState();
+  clearViews();
+  Object.assign(conn, { port, parser: new MavParser(), closing: false, writer: port.writable.getWriter(), txChain: Promise.resolve() });
+  conn.readLoop = readLoop();
+  setConnectedUi(true);
+  notify('Port opened, waiting for heartbeat...');
+}
+
+async function readLoop() {
+  while (conn.port && conn.port.readable && !conn.closing) {
+    conn.reader = conn.port.readable.getReader();
+    try {
+      for (;;) {
+        const { value, done } = await conn.reader.read();
+        if (done) break;
+        for (const msg of conn.parser.push(value)) {
+          try { handleMessage(msg); } catch (e) { console.error(e); notify(`Internal error: ${e.message}`, 0); }
+        }
+      }
+    } catch (e) {
+      if (!conn.closing) {
+        notify(`Connection error: ${e.message}`, 0);
+        conn.reader.releaseLock();
+        conn.reader = null;
+        disconnect();
+        return;
+      }
+    } finally {
+      if (conn.reader) { conn.reader.releaseLock(); conn.reader = null; }
+    }
+  }
+}
+
+async function disconnect() {
+  if (!conn.port || conn.closing) return;
+  conn.closing = true;
+  stopTimers();
+  const port = conn.port;
+  try { if (conn.reader) await conn.reader.cancel(); } catch { /* already closed */ }
+  try { await conn.readLoop; } catch { /* ignore */ }
+  try { await conn.txChain; } catch { /* ignore */ }
+  try { conn.writer.releaseLock(); } catch { /* ignore */ }
+  try { await port.close(); } catch { /* ignore */ }
+  Object.assign(conn, { port: null, reader: null, writer: null, readLoop: null, closing: false });
+  setConnectedUi(false);
+  notify('Disconnected');
+}
+
+function send(name, values) {
+  if (!conn.writer || conn.closing) return;
+  const frame = encodeMessage(name, values);
+  conn.txChain = conn.txChain.then(() => conn.writer && conn.writer.write(frame)).catch(e => {
+    notify(`Write error: ${e.message}`, 0);
+  });
+}
+
+function sendCommand(command, ...params) {
+  const p = [...params, 0, 0, 0, 0, 0, 0, 0];
+  send('COMMAND_LONG', { target_system: S.target[0], target_component: S.target[1], command, confirmation: 0,
+    param1: p[0], param2: p[1], param3: p[2], param4: p[3], param5: p[4], param6: p[5], param7: p[6] });
+}
+
+function sendHeartbeat() {
+  send('HEARTBEAT', { type: K.MAV_TYPE_GCS, autopilot: K.MAV_AUTOPILOT_INVALID, base_mode: 0, custom_mode: 0,
+    system_status: 0, mavlink_version: 3 });
+}
+
+function stopTimers() {
+  for (const key of Object.keys(timers)) { clearInterval(timers[key]); timers[key] = null; }
+}
+
+function setConnectedUi(connected) {
+  const btn = $('connect');
+  btn.textContent = connected ? 'Disconnect' : 'Connect';
+  btn.classList.toggle('connected', connected);
+  $('baud').disabled = connected;
+  for (const node of document.querySelectorAll('[data-needs-link]')) node.disabled = !connected;
+  if (connected) {
+    timers.refresh = setInterval(refresh, REFRESH_MS);
+    timers.heartbeat = setInterval(sendHeartbeat, 1000);
+  } else {
+    stopTimers();
+  }
+  updatePill();
+}
+
+function updatePill() {
+  let text, color;
+  if (!conn.port) [text, color] = ['Disconnected', COLOR.err];
+  else if (!S.target) [text, color] = ['Waiting heartbeat', COLOR.warn];
+  else if (now() - S.lastHeartbeat > HEARTBEAT_TIMEOUT_S) [text, color] = ['Link lost', COLOR.err];
+  else [text, color] = ['Connected', COLOR.ok];
+  const pill = $('pill');
+  setText(pill, `●  ${text}`, color);
+  pill.style.borderColor = color;
+}
+
+// ---- parameters ------------------------------------------------------------------------------
+
+function startParamFetch() {
+  if (!conn.port || !S.target) return;
+  let names = [];
+  if (isPX4()) names = Object.values(PX4_DEVICE_PARAMS).flat();
+  else if (isArduPilot()) names = [...Object.values(AP_DEVICE_PARAMS).flat(), ...AP_EXTRA_PARAMS, ...AP_SETUP_PARAMS];
+  S.paramNames = [...new Set(names)];
+  for (const n of S.paramNames) S.params.delete(n);
+  S.netLoaded = false;
+  fetchParams();
+}
+
+function fetchParams() {
+  S.paramTries = 0;
+  clearInterval(timers.params);
+  timers.params = null;
+  requestMissingParams();
+  if (S.paramNames.length && !timers.params) timers.params = setInterval(requestMissingParams, PARAM_RETRY_MS);
+}
+
+function requestMissingParams() {
+  const missing = S.paramNames.filter(n => !S.params.has(n));
+  if (!missing.length || S.paramTries >= PARAM_MAX_TRIES) {
+    clearInterval(timers.params);
+    timers.params = null;
+    return;
+  }
+  S.paramTries++;
+  for (const name of missing) {
+    send('PARAM_REQUEST_READ', { target_system: S.target[0], target_component: S.target[1], param_id: name, param_index: -1 });
+  }
+}
+
+const paramFetching = () => timers.params !== null;
+const paramInt = name => S.params.has(name) ? Math.trunc(S.params.get(name)) : 0;
+const paramMissing = name => S.paramNames.includes(name) && !S.params.has(name) && !paramFetching();
+
+function paramLookup(name) {
+  if (S.params.has(name)) {
+    const v = S.params.get(name);
+    return [formatParam(v, INT_TYPES.has(S.paramTypes.get(name))), '', v];
+  }
+  if (!S.target) return ['-', COLOR.muted, null];
+  if (paramMissing(name)) return ['n/a', COLOR.muted, null];
+  return ['…', COLOR.muted, null];
+}
+
+function writeParams(pairs) {
+  if (!S.target) return ['Not connected', COLOR.err];
+  const changes = [];
+  for (const [name, text] of pairs) {
+    if (!text || paramMissing(name)) continue;
+    const value = Number(text);
+    if (!Number.isFinite(value)) return [`Invalid value for ${name}: ${text}`, COLOR.err];
+    const current = S.params.get(name);
+    if (current !== undefined && Math.fround(current) === Math.fround(value)) continue;
+    changes.push([name, value]);
+  }
+  if (!changes.length) return ['Nothing to change', COLOR.muted];
+  for (const [name, value] of changes) {
+    const type = S.paramTypes.get(name) ?? K.MAV_PARAM_TYPE_REAL32;
+    const raw = isPX4() && INT_TYPES.has(type) ? intBitsToFloat(Math.trunc(value)) : value;
+    send('PARAM_SET', { target_system: S.target[0], target_component: S.target[1], param_id: name, param_value: raw, param_type: type });
+    S.params.delete(name);
+    if (!S.paramNames.includes(name)) S.paramNames.push(name);
+  }
+  fetchParams();
+  return [`Wrote ${changes.length} parameter(s), reboot to apply`, COLOR.ok];
+}
+
+// ---- board info helpers ----------------------------------------------------------------------
+
+function deviceId(kind, inst) {
+  const names = (isPX4() ? PX4_DEVICE_PARAMS : AP_DEVICE_PARAMS)[kind] || [];
+  return inst < names.length ? paramInt(names[inst]) : 0;
+}
+
+function devices(kind) {
+  return range(3).map(i => deviceId(kind, i)).filter(Boolean).map(d => decodeDeviceId(d, kind, isArduPilot()));
+}
+
+function fresh(kind) {
+  const t = now();
+  for (const [key, entry] of S.live) if (key.startsWith(kind + ':') && t - entry.t <= STALE_S) return true;
+  return false;
+}
+
+function gpsPorts() {
+  const ports = [];
+  for (let i = 1; i <= 8; i++) {
+    if (paramInt(`SERIAL${i}_PROTOCOL`) === SERIAL_PROTOCOL_GPS) {
+      const code = paramInt(`SERIAL${i}_BAUD`), baud = SERIAL_BAUDS[code] ?? code;
+      ports.push(baud ? `SERIAL${i} @ ${baud}` : `SERIAL${i}`);
+    }
+  }
+  return ports;
+}
+
+function gpsType(inst) {
+  for (const name of inst === 0 ? ['GPS1_TYPE', 'GPS_TYPE'] : ['GPS2_TYPE', 'GPS_TYPE2']) {
+    if (S.params.has(name)) return Math.trunc(S.params.get(name));
+  }
+  return null;
+}
+
+function sysStatusState(bit) {
+  if (!S.sysStatus) return null;
+  const [present, enabled, healthy] = S.sysStatus;
+  return [!!(present & bit), !!(enabled & bit), !!(healthy & bit)];
+}
+
+// ---- incoming messages -----------------------------------------------------------------------
+
+function setLive(kind, inst, msg, text) { S.live.set(liveKey(kind, inst), { msg, text, t: now() }); }
+function setValue(key, label, text) { S.values.set(key, { label, text, t: now() }); }
+
+function setMag(inst, msg, x, y, z, unit, toMgauss = null, digits = 0) {
+  setLive('mag', inst, msg, xyz(x, y, z, unit, digits));
+  if (toMgauss !== null) S.magField.set(inst, Math.hypot(x, y, z) * toMgauss);
+}
+
+function imu(inst, msg, m, unitAcc, unitGyro, unitMag) {
+  setLive('accel', inst, msg, xyz(m.xacc, m.yacc, m.zacc, unitAcc));
+  setLive('gyro', inst, msg, xyz(m.xgyro, m.ygyro, m.zgyro, unitGyro));
+  if (m.xmag || m.ymag || m.zmag) setMag(inst, msg, m.xmag, m.ymag, m.zmag, unitMag, unitMag === 'mGauss' ? 1 : null);
+  if (m.temperature) setLive('temp', inst, msg, `${(m.temperature / 100).toFixed(1)} C`);
+}
+
+function pressure(inst, msg, m) {
+  setLive('baro', inst, msg, `${m.press_abs.toFixed(2)} hPa   ${(m.temperature / 100).toFixed(1)} C`);
+  if (m.press_diff) setLive('airspeed', inst, msg, `${m.press_diff.toFixed(3)} hPa`);
+}
+
+function gps(inst, msg, m) {
+  const info = {
+    fix: GPS_FIX[m.fix_type] ?? String(m.fix_type), fixType: m.fix_type,
+    sats: m.satellites_visible !== 255 ? m.satellites_visible : null, hdop: m.eph !== 0xffff ? m.eph / 100 : null,
+    lat: m.lat / 1e7, lon: m.lon / 1e7, alt: m.alt / 1000, t: now(),
+  };
+  S.gps.set(inst, info);
+  setLive('gps', inst, msg, info.fix);
+}
+
+function modeString(m) {
+  if (!(m.base_mode & K.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED)) return `Mode(${hex(m.base_mode, 8)})`;
+  const map = DEFS.modes[m.type];
+  return map && map[m.custom_mode] !== undefined ? map[m.custom_mode] : `Mode(${m.custom_mode})`;
+}
+
+const HANDLERS = {
+  HEARTBEAT(m) {
+    if (m.autopilot === K.MAV_AUTOPILOT_INVALID) return;
+    if (S.target && m._sys !== S.target[0]) return;
+    const first = !S.target;
+    S.target = [m._sys, m._comp];
+    S.autopilot = m.autopilot;
+    S.lastHeartbeat = now();
+    S.hb = {
+      autopilot: AUTOPILOT_NAMES[m.autopilot] ?? enumName('MAV_AUTOPILOT', m.autopilot),
+      vehicle: enumName('MAV_TYPE', m.type), state: enumName('MAV_STATE', m.system_status),
+      armed: !!(m.base_mode & K.MAV_MODE_FLAG_SAFETY_ARMED), mode: modeString(m),
+    };
+    if (first) {
+      notify(`Board found: system ${S.target[0]}, ${S.hb.autopilot}`);
+      send('REQUEST_DATA_STREAM', { target_system: S.target[0], target_component: S.target[1],
+        req_stream_id: K.MAV_DATA_STREAM_ALL, req_message_rate: 4, start_stop: 1 });
+      sendCommand(K.MAV_CMD_REQUEST_MESSAGE, K.MAVLINK_MSG_ID_AUTOPILOT_VERSION);
+      if (isArduPilot()) sendCommand(K.MAV_CMD_DO_SEND_BANNER);
+      startParamFetch();
+    }
+  },
+  AUTOPILOT_VERSION(m) {
+    const v = m.flight_sw_version;
+    const types = { 0: 'dev', 64: 'alpha', 128: 'beta', 192: 'rc', 255: 'official' };
+    S.version.fwNumber = `${(v >>> 24) & 0xff}.${(v >>> 16) & 0xff}.${(v >>> 8) & 0xff} ${types[v & 0xff] ?? ''}`.trim();
+    S.version.boardId = m.board_version ? String(m.board_version >>> 16) : '-';
+    const uid2 = m.uid2 || [];
+    if (uid2.some(Boolean)) {
+      let end = uid2.length;
+      while (end && !uid2[end - 1]) end--;
+      S.version.uid = uid2.slice(0, end).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join('');
+    } else if (m.uid) {
+      S.version.uid = m.uid.toString(16).toUpperCase().padStart(16, '0');
+    }
+  },
+  STATUSTEXT(m) {
+    const text = m.text.trim();
+    const board = text.match(/^(\S+)\s+([0-9A-F]{8})\s+([0-9A-F]{8})\s+([0-9A-F]{8})$/);
+    if (board) {
+      S.version.board = board[1];
+      S.version.uid ??= board[2] + board[3] + board[4];
+    } else if (/^(Ardu\w+|Blimp|AP_Periph)\s+V\d/.test(text)) {
+      S.version.firmware = text;
+    } else if (text.startsWith('Frame:')) {
+      S.version.frame = text.slice(6).trim();
+    }
+    if (text.toUpperCase().includes('IOMCU')) S.iomcu = [m.severity, text];
+    const severity = enumName('MAV_SEVERITY', m.severity);
+    S.log.push([new Date().toTimeString().slice(0, 8), m.severity, severity, text]);
+    if (S.log.length > STATUS_LOG_MAX) S.log.splice(0, S.log.length - STATUS_LOG_MAX);
+    S.logSeq++;
+    notify(`[${severity}] ${text}`);
+  },
+  PARAM_VALUE(m) {
+    let value = m.param_value;
+    if (INT_TYPES.has(m.param_type)) value = isPX4() ? floatBitsToInt(value) : Math.round(value);
+    S.params.set(m.param_id, value);
+    S.paramTypes.set(m.param_id, m.param_type);
+  },
+  SYS_STATUS(m) {
+    S.sysStatus = [m.onboard_control_sensors_present, m.onboard_control_sensors_enabled, m.onboard_control_sensors_health];
+    S.power = {
+      voltage: m.voltage_battery !== 0xffff ? m.voltage_battery / 1000 : null,
+      current: m.current_battery >= 0 ? m.current_battery / 100 : null,
+      remaining: m.battery_remaining >= 0 ? m.battery_remaining : null,
+      load: m.load / 10, drop: m.drop_rate_comm / 100, t: now(),
+    };
+  },
+  POWER_STATUS(m) { S.powerStatus = { vcc: m.Vcc / 1000, vservo: m.Vservo / 1000, flags: m.flags, t: now() }; },
+  MCU_STATUS(m) {
+    S.mcu = { temp: m.MCU_temperature / 100, v: m.MCU_voltage / 1000, vmin: m.MCU_voltage_min / 1000,
+      vmax: m.MCU_voltage_max / 1000, t: now() };
+  },
+  HWSTATUS(m) { S.hwstatus = { vcc: m.Vcc / 1000, t: now() }; },
+  SYSTEM_TIME(m) { S.version.uptime = formatUptime(m.time_boot_ms); },
+  RAW_IMU(m) {
+    // ArduPilot fills RAW_IMU with scaled, calibrated values (same units as SCALED_IMU)
+    if (isArduPilot()) imu(m.id || 0, 'RAW_IMU', m, 'mG', 'mrad/s', 'mGauss');
+    else imu(m.id || 0, 'RAW_IMU', m, 'raw', 'raw', 'raw');
+  },
+  SCALED_IMU(m) { imu(0, 'SCALED_IMU', m, 'mG', 'mrad/s', 'mGauss'); },
+  SCALED_IMU2(m) { imu(1, 'SCALED_IMU2', m, 'mG', 'mrad/s', 'mGauss'); },
+  SCALED_IMU3(m) { imu(2, 'SCALED_IMU3', m, 'mG', 'mrad/s', 'mGauss'); },
+  HIGHRES_IMU(m) {
+    const inst = m.id || 0;
+    setLive('accel', inst, 'HIGHRES_IMU', xyz(m.xacc, m.yacc, m.zacc, 'm/s2', 2));
+    setLive('gyro', inst, 'HIGHRES_IMU', xyz(m.xgyro, m.ygyro, m.zgyro, 'rad/s', 3));
+    setMag(inst, 'HIGHRES_IMU', m.xmag, m.ymag, m.zmag, 'Gauss', 1000, 3);
+    setLive('baro', inst, 'HIGHRES_IMU', `${m.abs_pressure.toFixed(2)} hPa   ${m.temperature.toFixed(1)} C`);
+  },
+  SCALED_PRESSURE(m) { pressure(0, 'SCALED_PRESSURE', m); },
+  SCALED_PRESSURE2(m) { pressure(1, 'SCALED_PRESSURE2', m); },
+  SCALED_PRESSURE3(m) { pressure(2, 'SCALED_PRESSURE3', m); },
+  GPS_RAW_INT(m) { gps(0, 'GPS_RAW_INT', m); },
+  GPS2_RAW(m) { gps(1, 'GPS2_RAW', m); },
+  ATTITUDE(m) { S.attitude = { roll: deg(m.roll), pitch: deg(m.pitch), yaw: (deg(m.yaw) + 360) % 360, t: now() }; },
+  VFR_HUD(m) {
+    setValue('hud', 'Speed / Altitude', `Airspeed ${m.airspeed.toFixed(1)} m/s   Groundspeed ${m.groundspeed.toFixed(1)} m/s   `
+      + `Alt ${m.alt.toFixed(1)} m   Heading ${m.heading}`);
+  },
+  DISTANCE_SENSOR(m) {
+    setLive('range', m.id, 'DISTANCE_SENSOR', `${m.current_distance} cm   (range ${m.min_distance}-${m.max_distance} cm)`);
+  },
+  RANGEFINDER(m) {
+    const cur = S.live.get(liveKey('range', 0));
+    if (!cur || cur.msg === 'RANGEFINDER') setLive('range', 0, 'RANGEFINDER', `${(m.distance * 100).toFixed(0)} cm   ${m.voltage.toFixed(2)} V`);
+  },
+  OPTICAL_FLOW(m) { setLive('flow', 0, 'OPTICAL_FLOW', `X ${m.flow_x}   Y ${m.flow_y}   Quality ${m.quality}`); },
+  BATTERY_STATUS(m) {
+    const cells = m.voltages.filter(v => v !== 0 && v !== 0xffff);
+    const volt = cells.length ? `${(cells.reduce((a, b) => a + b, 0) / 1000).toFixed(2)} V` : '-';
+    const curr = m.current_battery >= 0 ? `${(m.current_battery / 100).toFixed(2)} A` : '- A';
+    setValue(`battery${m.id + 1}`, `Battery ${m.id + 1}`, `${volt}   ${curr}   ${m.battery_remaining} %`);
+  },
+  RC_CHANNELS(m) {
+    S.rc = { chans: range(Math.min(m.chancount, 18)).map(i => m[`chan${i + 1}_raw`]), rssi: m.rssi, t: now() };
+  },
+  SERVO_OUTPUT_RAW(m) {
+    if (m.port) return;
+    const outs = range(16).map(i => m[`servo${i + 1}_raw`] || 0);
+    while (outs.length > 8 && !outs[outs.length - 1]) outs.pop();
+    S.servo = outs;
+  },
+  EKF_STATUS_REPORT(m) {
+    setValue('ekf', 'EKF Variances', `Vel ${m.velocity_variance.toFixed(2)}   Pos ${m.pos_horiz_variance.toFixed(2)}   `
+      + `Alt ${m.pos_vert_variance.toFixed(2)}   Mag ${m.compass_variance.toFixed(2)}`);
+  },
+};
+
+function handleMessage(msg) {
+  if (msg._name === 'HEARTBEAT' && msg.type === K.MAV_TYPE_GCS) return;
+  if (S.target && msg._name !== 'HEARTBEAT' && msg._sys !== S.target[0]) return;
+  const handler = HANDLERS[msg._name];
+  if (handler) handler(msg);
+}
+
+// ---- monitor page ----------------------------------------------------------------------------
+
+const BOARD_KEYS = ['Board', 'Firmware', 'Autopilot', 'Vehicle', 'Frame', 'Flight Mode', 'Armed',
+  'System State', 'System / Component', 'Board ID', 'UID', 'Uptime'];
+const boardValues = {};
+for (const key of BOARD_KEYS) {
+  const v = el('span', { class: 'v', text: '-' });
+  $('board').append(el('span', { class: 'k', text: key }), v);
+  boardValues[key] = v;
+}
+
+function syncChannels(container, values) {
+  if (container.childElementCount !== values.length * 3 || (!values.length && !container.childElementCount)) {
+    container.replaceChildren();
+    if (!values.length) container.append(el('span', { class: 'muted', text: 'No data' }));
+    values.forEach((_, i) => {
+      const bar = el('div', { class: 'bar' }, el('div'));
+      container.append(el('span', { class: 'name', text: `${container.id === 'rc' ? 'CH' : 'OUT'}${i + 1}` }), bar,
+        el('span', { class: 'val', text: '-' }));
+    });
+  }
+  values.forEach((v, i) => {
+    const used = v > 0 && v < 0xffff;
+    const clamped = Math.max(PWM_MIN, Math.min(PWM_MAX, v));
+    container.children[i * 3 + 1].firstChild.style.width = used ? `${(clamped - PWM_MIN) / (PWM_MAX - PWM_MIN) * 100}%` : '0';
+    setText(container.children[i * 3 + 2], used ? String(v) : '-');
+  });
+}
+
+function refreshBoard() {
+  const hb = S.hb, v = S.version;
+  if (hb) {
+    const set = (k, t, c) => setText(boardValues[k], t, c);
+    set('Board', v.board ?? '-');
+    set('Firmware', v.firmware ?? v.fwNumber ?? '-');
+    set('Autopilot', hb.autopilot);
+    set('Vehicle', hb.vehicle);
+    set('Frame', v.frame ?? '-');
+    set('Flight Mode', hb.mode);
+    set('Armed', hb.armed ? 'ARMED' : 'Disarmed', hb.armed ? COLOR.err : COLOR.ok);
+    set('System State', hb.state);
+    set('System / Component', `${S.target[0]} / ${S.target[1]}`);
+    set('Board ID', v.boardId ?? '-');
+    set('UID', v.uid ?? '-');
+    set('Uptime', v.uptime ?? '-');
+  }
+  if (S.rc) {
+    syncChannels($('rc'), S.rc.chans);
+    setText($('rc-info'), S.rc.rssi !== 255 ? `RSSI ${S.rc.rssi}` : '');
+  }
+  if (S.servo) syncChannels($('servo'), S.servo);
+}
+
+function liveRows() {
+  const t0 = now(), ardupilot = isArduPilot();
+  const empty = { bus: '-', address: '-', chip: '-' };
+  const rows = [];
+  const stale = t => t0 - t > STALE_S;
+  const timed = (t, color = '') => stale(t) ? COLOR.err : color;
+  const live = key => {
+    const e = S.live.get(key);
+    return e ? [e.text, stale(e.t) ? COLOR.err : ''] : ['No data', COLOR.err];
+  };
+  const group = (label, chip = '', bus = '', addr = '', value = '', color = '') =>
+    rows.push([{ t: label, b: true }, { t: chip, b: true }, { t: bus }, { t: addr }, { t: value, c: color }]);
+  const child = (label, value, color) =>
+    rows.push([{ t: label, cls: 'child' }, {}, {}, {}, { t: value, c: color }]);
+  const single = (label, chip, bus, addr, value, color) =>
+    rows.push([{ t: label }, { t: chip }, { t: bus }, { t: addr }, { t: value, c: color }]);
+
+  for (const inst of range(3)) {
+    const devs = { accel: deviceId('accel', inst), gyro: deviceId('gyro', inst) };
+    const parts = IMU_PARTS.filter(([kind]) => devs[kind] || S.live.has(liveKey(kind, inst)));
+    if (!parts.length) continue;
+    const infos = Object.entries(devs).filter(([, d]) => d).map(([kind, d]) => decodeDeviceId(d, kind, ardupilot));
+    if (!infos.length) infos.push(empty);
+    const join = field => [...new Set(infos.map(i => i[field]))].join(' / ');
+    group(`IMU ${inst + 1}`, join('chip'), join('bus'), join('address'));
+    for (const [kind, label] of parts) child(label, ...live(liveKey(kind, inst)));
+  }
+
+  for (const inst of range(3)) {
+    const dev = deviceId('mag', inst), key = liveKey('mag', inst);
+    if (!dev && !S.live.has(key)) continue;
+    const info = dev ? decodeDeviceId(dev, 'mag', ardupilot) : empty;
+    group(`Compass ${inst + 1}`, info.chip, info.bus, info.address);
+    child('Field', ...live(key));
+    const field = S.magField.get(inst);
+    if (field !== undefined) {
+      const bad = field < MAG_FIELD_MIN || field > MAG_FIELD_MAX;
+      child('MagField', `${field.toFixed(0)} mGauss   (EMI check ${MAG_FIELD_MIN}-${MAG_FIELD_MAX})`,
+        timed(S.live.get(key).t, bad ? COLOR.err : COLOR.ok));
+    }
+  }
+
+  for (const inst of range(3)) {
+    const dev = deviceId('baro', inst), key = liveKey('baro', inst);
+    if (!dev && !S.live.has(key)) continue;
+    const info = dev ? decodeDeviceId(dev, 'baro', ardupilot) : empty;
+    single(`Barometer ${inst + 1}`, info.chip, info.bus, info.address, ...live(key));
+  }
+
+  const ports = gpsPorts();
+  for (const inst of range(2)) {
+    const gtype = gpsType(inst), info = S.gps.get(inst);
+    if (!gtype && !info) continue;
+    const chip = gtype !== null ? GPS_TYPES[gtype] ?? `Type ${gtype}` : '-';
+    const bus = gtype === 9 ? 'DroneCAN' : gtype !== null ? 'Serial' : '-';
+    const port = gtype === 9 ? '-' : ports[inst] ?? '-';
+    if (!info) { single(`GPS ${inst + 1}`, chip, bus, port, 'No data', COLOR.err); continue; }
+    group(`GPS ${inst + 1}`, chip, bus, port);
+    const fixColor = info.fixType >= 3 ? COLOR.ok : info.fixType === 2 ? COLOR.warn : COLOR.err;
+    child('Fix', info.fix, timed(info.t, fixColor));
+    child('Satellites', info.sats !== null ? String(info.sats) : '-', timed(info.t));
+    child('HDOP', info.hdop !== null ? info.hdop.toFixed(2) : '-', timed(info.t));
+    child('Position', `${info.lat.toFixed(7)}, ${info.lon.toFixed(7)}`, timed(info.t));
+    child('Altitude', `${info.alt.toFixed(1)} m`, timed(info.t));
+  }
+
+  for (const [kind, param] of [['range', 'RNGFND1_TYPE'], ['flow', 'FLOW_TYPE'], ['airspeed', 'ARSPD_TYPE']]) {
+    let instances = [...S.live.keys()].filter(k => k.startsWith(kind + ':')).map(k => +k.split(':')[1]).sort();
+    if (!instances.length && paramInt(param)) instances = [0];
+    for (const inst of instances) {
+      const ptype = inst === 0 ? paramInt(param) : 0;
+      single(`${KIND_LABELS[kind]} ${inst + 1}`, ptype ? `Type ${ptype}` : '-', '-', '-', ...live(liveKey(kind, inst)));
+    }
+  }
+
+  if (S.attitude) {
+    const a = S.attitude;
+    group('Attitude');
+    child('Roll', `${a.roll.toFixed(1)}°`, timed(a.t));
+    child('Pitch', `${a.pitch.toFixed(1)}°`, timed(a.t));
+    child('Yaw', `${a.yaw.toFixed(1)}°`, timed(a.t));
+  }
+
+  const pw = S.power;
+  if (pw) {
+    group('Power');
+    child('Voltage', pw.voltage !== null ? `${pw.voltage.toFixed(2)} V` : '-', timed(pw.t));
+    child('Current', pw.current !== null ? `${pw.current.toFixed(2)} A` : '-', timed(pw.t));
+    child('Remaining', pw.remaining !== null ? `${pw.remaining} %` : '-', timed(pw.t));
+    child('CPU Load', `${pw.load.toFixed(1)} %`, timed(pw.t, pw.load > 80 ? COLOR.warn : ''));
+    child('Link Loss', `${pw.drop.toFixed(1)} %`, timed(pw.t, pw.drop > 5 ? COLOR.err : ''));
+  }
+
+  for (const v of [...S.values.values()].sort((a, b) => a.label.localeCompare(b.label))) {
+    single(v.label, '', '', '', v.text, timed(v.t));
+  }
+  return rows;
+}
+
+function refreshStatusLog(force = false) {
+  const maxSeverity = +$('severity').value;
+  const key = `${S.logSeq}:${maxSeverity}`;
+  if (!force && S.logShown === key) return;
+  S.logShown = key;
+  const wrap = $('log-wrap');
+  const atBottom = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 40;
+  const rows = S.log.filter(e => e[1] <= maxSeverity).map(([stamp, level, severity, text]) => {
+    const color = level <= K.MAV_SEVERITY_ERROR ? COLOR.err : level === K.MAV_SEVERITY_WARNING ? COLOR.warn
+      : level === K.MAV_SEVERITY_DEBUG ? COLOR.muted : '';
+    return [{ t: stamp, c: COLOR.muted }, { t: severity, c: color }, { t: text, c: color, cls: 'wrap' }];
+  });
+  syncRows($('log'), rows);
+  if (atBottom) wrap.scrollTop = wrap.scrollHeight;
+}
+
+// ---- setup page ------------------------------------------------------------------------------
+
+function detectPeripheral(key) {
+  if (!S.target) return ['-', COLOR.muted];
+  const mags = new Set(devices('mag').map(d => d.name)), imus = new Set(devices('accel').map(d => d.name));
+  const found = {
+    hflow: () => fresh('flow') && paramInt('FLOW_TYPE') === 6,
+    hmc5883: () => [...mags].some(n => n && n.startsWith('HMC5883')),
+    tfluna: () => fresh('range') && paramInt('RNGFND1_TYPE') === 20,
+    pmw3901: () => fresh('flow') && paramInt('FLOW_TYPE') === 4,
+    mpu9250: () => imus.has('MPU9250') || mags.has('AK8963'),
+  }[key]?.() ?? false;
+  return found ? ['● Detected', COLOR.ok] : ['● Not detected', COLOR.muted];
+}
+
+const peripheralCards = PERIPHERALS.map(spec => {
+  const detect = el('span', { class: 'strong', text: '-' });
+  const head = el('div', { class: 'card-head' }, el('span', { class: 'card-title', text: spec.name }),
+    el('span', { class: 'badge', text: spec.iface }), el('span', { class: 'spacer' }), detect);
+  const card = el('div', { class: 'card' }, head, el('div', { class: 'muted', text: spec.note }));
+  let portSel = null;
+  if (spec.port) {
+    portSel = el('select');
+    for (let i = 1; i <= 8; i++) portSel.append(el('option', { value: i, text: `SERIAL${i}` }));
+    portSel.value = spec.port;
+    card.append(el('div', { class: 'toolbar' }, el('span', { class: 'muted', text: 'Serial port' }), portSel));
+  }
+  const tbody = el('tbody');
+  card.append(el('div', { class: 'table-wrap' }, el('table', {},
+    el('thead', {}, el('tr', {}, el('th', { text: 'Parameter', style: 'width:100%' }), el('th', { text: 'Current' }), el('th', { text: 'New' }))),
+    tbody)));
+  const status = el('span', { class: 'status' });
+  const apply = el('button', { text: 'Apply', 'data-needs-link': '' });
+  card.append(el('div', { class: 'card-foot' }, status, apply));
+
+  const p = { spec, card, inputs: [], current: [] };
+  p.entries = () => spec.params.map(([n, v]) => [n.replace('{port}', portSel ? portSel.value : ''), v]);
+  p.rebuild = () => {
+    tbody.replaceChildren();
+    p.inputs = [];
+    p.current = [];
+    for (const [name, v] of p.entries()) {
+      const input = el('input', { type: 'text' });
+      input.value = Array.isArray(v) ? '' : String(v);
+      const cur = el('td', { text: '-' });
+      tbody.append(el('tr', {}, el('td', { text: name }), cur, el('td', {}, input)));
+      p.inputs.push(input);
+      p.current.push(cur);
+    }
+    setText(status, '');
+  };
+  p.refresh = () => {
+    p.entries().forEach(([name, v], i) => {
+      const [text, color, value] = paramLookup(name);
+      setText(p.current[i], text, color);
+      if (Array.isArray(v) && !p.inputs[i].value && value !== null) p.inputs[i].value = String(Math.trunc(value) & ~(1 << v[1]));
+    });
+    setText(detect, ...detectPeripheral(spec.detect));
+  };
+  if (portSel) portSel.addEventListener('change', p.rebuild);
+  apply.addEventListener('click', () => setText(status, ...writeParams(p.entries().map(([n], i) => [n, p.inputs[i].value.trim()]))));
+  p.rebuild();
+  $('peripherals').append(card);
+  return p;
+});
+
+$('peripherals').append($('network-template').content.cloneNode(true));
+for (const id of ['net-reload', 'net-apply']) $(id).setAttribute('data-needs-link', '');
+
+function parseIPv4(text) {
+  const parts = text.trim().split('.');
+  if (parts.length !== 4 || parts.some(p => !/^\d{1,3}$/.test(p) || +p > 255)) throw new Error(`invalid IPv4 address '${text}'`);
+  return parts.map(Number);
+}
+
+function maskBits(text) {
+  const s = text.trim().replace(/^\//, '');
+  if (/^\d+$/.test(s) && +s <= 32) return +s;
+  const [a, b, c, d] = parseIPv4(s);
+  const v = ((a << 24) | (b << 16) | (c << 8) | d) >>> 0;
+  const bits = Math.clz32(~v >>> 0);  // leading one bits
+  if (bits < 32 && (v << bits) >>> 0 !== 0) throw new Error(`invalid netmask '${text}'`);
+  return bits;
+}
+
+function bitsToMask(bits) {
+  const v = bits ? (0xffffffff << (32 - bits)) >>> 0 : 0;
+  return [v >>> 24, (v >>> 16) & 255, (v >>> 8) & 255, v & 255].join('.');
+}
+
+function updateNetFields() {
+  const statik = !$('net-dhcp').checked;
+  for (const id of ['net-ip', 'net-mask', 'net-gw']) $(id).disabled = !statik;
+}
+
+function loadNetwork() {
+  if (S.netLoaded || NET_CONFIG_PARAMS.some(n => !S.params.has(n))) return;
+  S.netLoaded = true;
+  $('net-enable').checked = !!paramInt('NET_ENABLE');
+  $('net-dhcp').checked = !!paramInt('NET_DHCP');
+  $('net-ip').value = NET_IP_PARAMS.map(paramInt).join('.');
+  $('net-gw').value = NET_GW_PARAMS.map(paramInt).join('.');
+  $('net-mask').value = bitsToMask(Math.max(0, Math.min(32, paramInt('NET_NETMASK'))));
+  if (NET_MAC_PARAMS.every(n => S.params.has(n))) {
+    $('net-mac').textContent = NET_MAC_PARAMS.map(n => paramInt(n).toString(16).toUpperCase().padStart(2, '0')).join(':');
+  }
+  updateNetFields();
+}
+
+function applyNetwork() {
+  const pairs = [['NET_ENABLE', $('net-enable').checked ? '1' : '0'], ['NET_DHCP', $('net-dhcp').checked ? '1' : '0']];
+  if (!$('net-dhcp').checked) {
+    try {
+      const ip = parseIPv4($('net-ip').value), gw = parseIPv4($('net-gw').value), bits = maskBits($('net-mask').value);
+      NET_IP_PARAMS.forEach((n, i) => pairs.push([n, String(ip[i])]));
+      NET_GW_PARAMS.forEach((n, i) => pairs.push([n, String(gw[i])]));
+      pairs.push(['NET_NETMASK', String(bits)]);
+    } catch (e) {
+      setText($('net-status'), `Invalid address: ${e.message}`, COLOR.err);
+      return;
+    }
+  }
+  setText($('net-status'), ...writeParams(pairs));
+}
+
+function reloadNetwork() {
+  for (const n of NET_PARAMS) S.params.delete(n);
+  S.netLoaded = false;
+  fetchParams();
+}
+
+function onboardRows() {
+  const t0 = now(), rows = [];
+  const recent = d => d && t0 - d.t <= STALE_S;
+  const vstate = (v, lo, hi) => v >= lo && v <= hi ? ['OK', COLOR.ok] : ['Out of range', COLOR.err];
+  const add = (item, iface, status, color, details) => rows.push([{ t: item, b: true }, { t: iface, c: COLOR.muted },
+    { t: status, c: color }, { t: details }]);
+
+  const ps = recent(S.powerStatus) ? S.powerStatus : null;
+  const vcc = ps ? ps.vcc : recent(S.hwstatus) ? S.hwstatus.vcc : null;
+  if (vcc) add('Scaled 5V', 'ADC', ...vstate(vcc, 4.5, 5.5), `${vcc.toFixed(2)} V`);
+  else add('Scaled 5V', 'ADC', 'No data', COLOR.muted, 'Not reported (POWER_STATUS / HWSTATUS)');
+
+  const mcu = recent(S.mcu) ? S.mcu : null;
+  if (mcu) {
+    add('ADC1 3V3', 'ADC', ...vstate(mcu.v, 3.1, 3.5), `${mcu.v.toFixed(2)} V   (min ${mcu.vmin.toFixed(2)} V, max ${mcu.vmax.toFixed(2)} V)`);
+    add('MCU', 'Internal', mcu.temp < 85 ? 'OK' : 'Hot', mcu.temp < 85 ? COLOR.ok : COLOR.warn, `${mcu.temp.toFixed(1)} C`);
+  } else {
+    add('ADC1 3V3', 'ADC', 'No data', COLOR.muted, 'Not reported (MCU_STATUS)');
+  }
+
+  if (ps) {
+    const f = ps.flags, oc = f & K.MAV_POWER_STATUS_PERIPH_OVERCURRENT, hp = f & K.MAV_POWER_STATUS_PERIPH_HIPOWER_OVERCURRENT;
+    add('Peripheral power nEN / nOC', 'GPIO', oc || hp ? 'Overcurrent' : 'OK', oc || hp ? COLOR.err : COLOR.ok, [
+      `nOC ${oc ? 'active' : 'clear'}`, `Hi-power nOC ${hp ? 'active' : 'clear'}`,
+      `Brick ${f & K.MAV_POWER_STATUS_BRICK_VALID ? 'OK' : 'invalid'}`,
+      f & K.MAV_POWER_STATUS_SERVO_VALID ? `Servo rail ${ps.vservo.toFixed(2)} V` : 'Servo rail not powered',
+      f & K.MAV_POWER_STATUS_USB_CONNECTED ? 'USB connected' : 'USB not connected'].join('   '));
+  } else {
+    add('Peripheral power nEN / nOC', 'GPIO', 'No data', COLOR.muted, 'Not reported (POWER_STATUS)');
+  }
+
+  const batt = paramLookup('BATT_MONITOR')[2], pw = S.power;
+  const reading = pw && pw.voltage !== null && pw.current !== null ? `${pw.voltage.toFixed(2)} V   ${pw.current.toFixed(2)} A` : 'No reading';
+  if (batt === null) add('Onboard INA238', 'I2C', 'Unknown', COLOR.muted, 'BATT_MONITOR not read');
+  else if (Math.trunc(batt) === 21) add('Onboard INA238', 'I2C', 'Configured', COLOR.ok, `BATT_MONITOR = 21 (INA2xx)   ${reading}`);
+  else add('Onboard INA238', 'I2C', 'Not selected', COLOR.warn, `BATT_MONITOR = ${Math.trunc(batt)} (INA2xx is 21)`);
+
+  const baroInst = range(3).find(i => deviceId('baro', i) && decodeDeviceId(deviceId('baro', i), 'baro', isArduPilot()).name === 'BMP390');
+  if (baroInst !== undefined) {
+    const baro = decodeDeviceId(deviceId('baro', baroInst), 'baro', isArduPilot());
+    const value = S.live.get(liveKey('baro', baroInst));
+    add('Onboard Baro BMP390', 'I2C2', 'Detected', COLOR.ok, `${baro.bus}   ${baro.address}` + (value ? `   ${value.text}` : ''));
+  } else {
+    add('Onboard Baro BMP390', 'I2C2', 'Not detected', devices('baro').length ? COLOR.err : COLOR.muted, 'No BMP390 in BARO*_DEVID');
+  }
+
+  const io = paramLookup('BRD_IO_ENABLE')[2];
+  if (io === null) add('IO Communication', 'USART6 / IO_STATUS', 'Unknown', COLOR.muted, 'BRD_IO_ENABLE not available');
+  else if (!Math.trunc(io)) add('IO Communication', 'USART6 / IO_STATUS', 'Disabled', COLOR.muted, 'BRD_IO_ENABLE = 0');
+  else if (S.iomcu && S.iomcu[0] <= K.MAV_SEVERITY_WARNING) add('IO Communication', 'USART6 / IO_STATUS', 'Error', COLOR.err, S.iomcu[1]);
+  else add('IO Communication', 'USART6 / IO_STATUS', 'Enabled', COLOR.ok, S.iomcu ? S.iomcu[1] : 'BRD_IO_ENABLE = 1, no IOMCU errors reported');
+
+  const rcState = sysStatusState(K.MAV_SYS_STATUS_SENSOR_RC_RECEIVER), rc = recent(S.rc) ? S.rc : null;
+  if (rc && rc.chans.length && (!rcState || rcState[2])) {
+    add('SBUS RC', 'Serial', 'Receiving', COLOR.ok, `${rc.chans.length} channels` + (rc.rssi !== 255 ? `   RSSI ${rc.rssi}` : ''));
+  } else if (rcState && rcState[0]) {
+    add('SBUS RC', 'Serial', 'No signal', COLOR.err, 'RC receiver present but unhealthy');
+  } else {
+    add('SBUS RC', 'Serial', 'No signal', COLOR.muted, 'No RC_CHANNELS data');
+  }
+
+  const log = sysStatusState(K.MAV_SYS_STATUS_LOGGING);
+  if (!log) add('SD Card', 'SDMMC', 'Unknown', COLOR.muted, 'Waiting for SYS_STATUS');
+  else if (!log[0]) add('SD Card', 'SDMMC', 'Not reported', COLOR.muted, 'Logging disabled');
+  else if (log[2]) add('SD Card', 'SDMMC', 'Present', COLOR.ok, 'Logging healthy');
+  else add('SD Card', 'SDMMC', 'Missing / error', COLOR.err, 'Logging unhealthy (no card or write error)');
+
+  const proto = paramLookup(`SERIAL${CM5_SERIAL_PORT}_PROTOCOL`)[2], baud = paramLookup(`SERIAL${CM5_SERIAL_PORT}_BAUD`)[2];
+  if (proto === null) {
+    add('CM5 Serial', 'USART2 / TELEM3', 'Unknown', COLOR.muted, `SERIAL${CM5_SERIAL_PORT} not read`);
+  } else {
+    const name = SERIAL_PROTOCOLS[Math.trunc(proto)] ?? `Protocol ${Math.trunc(proto)}`;
+    const rate = baud !== null ? SERIAL_BAUDS[Math.trunc(baud)] ?? baud : '-';
+    const good = [1, 2, 45].includes(Math.trunc(proto));
+    add('CM5 Serial', 'USART2 / TELEM3', good ? 'Configured' : name, good ? COLOR.ok : COLOR.warn, `SERIAL${CM5_SERIAL_PORT}: ${name} @ ${rate}`);
+  }
+
+  const paramsOk = S.paramNames.some(n => S.params.has(n));
+  add('Onboard EEPROM AT24C02D', 'I2C3', 'Not reported', COLOR.muted, 'No MAVLink status for this device');
+  add('FRAM FM25V02A', 'SPI5', paramsOk ? 'Params readable' : 'Unknown', paramsOk ? COLOR.ok : COLOR.muted, 'Parameter storage (indirect check)');
+  return rows;
+}
+
+function refreshSetup() {
+  syncRows($('onboard'), onboardRows());
+  for (const p of peripheralCards) p.refresh();
+  loadNetwork();
+  if (paramMissing('NET_ENABLE')) setText($('net-status'), 'Board has no NET_* parameters (no Ethernet support)', COLOR.muted);
+}
+
+// ---- refresh loop ----------------------------------------------------------------------------
+
+function updateParamInfo() {
+  let text = '';
+  if (S.paramNames.length) {
+    const got = S.paramNames.filter(n => S.params.has(n)).length;
+    text = paramFetching() ? `Reading parameters ${got}/${S.paramNames.length}...` : `${got} of ${S.paramNames.length} parameters found`;
+  } else if (S.target) {
+    text = 'Parameters not available for this autopilot';
+  }
+  for (const node of document.querySelectorAll('.param-info')) setText(node, text);
+}
+
+let currentPage = 'monitor';
+function refresh() {
+  updatePill();
+  updateParamInfo();
+  if (currentPage === 'monitor') {
+    refreshBoard();
+    syncRows($('live'), liveRows());
+    refreshStatusLog();
+  } else {
+    refreshSetup();
+  }
+}
+
+function clearViews() {
+  for (const id of ['live', 'log', 'onboard']) $(id).replaceChildren();
+  for (const v of Object.values(boardValues)) setText(v, '-');
+  syncChannels($('rc'), []);
+  syncChannels($('servo'), []);
+  setText($('rc-info'), '');
+  for (const p of peripheralCards) p.rebuild();
+  for (const id of ['net-ip', 'net-mask', 'net-gw']) $(id).value = '';
+  $('net-mac').textContent = '-';
+  setText($('net-status'), '');
+  for (const node of document.querySelectorAll('.param-info')) setText(node, '');
+}
+
+// ---- wiring ----------------------------------------------------------------------------------
+
+for (const b of BAUD_RATES) $('baud').append(el('option', { value: b, text: String(b) }));
+$('baud').value = DEFAULT_BAUD;
+for (const id of ['reload-ids', 'read-params', 'reboot']) $(id).setAttribute('data-needs-link', '');
+
+for (const btn of document.querySelectorAll('.nav')) {
+  btn.addEventListener('click', () => {
+    currentPage = btn.dataset.page;
+    for (const b of document.querySelectorAll('.nav')) b.classList.toggle('active', b === btn);
+    $('page-monitor').hidden = currentPage !== 'monitor';
+    $('page-setup').hidden = currentPage !== 'setup';
+    if (conn.port) refresh();
+  });
+}
+
+$('connect').addEventListener('click', () => conn.port ? disconnect() : connect());
+$('reload-ids').addEventListener('click', startParamFetch);
+$('read-params').addEventListener('click', startParamFetch);
+$('reboot').addEventListener('click', () => {
+  if (S.target && confirm('Reboot the flight controller now?')) {
+    sendCommand(K.MAV_CMD_PREFLIGHT_REBOOT_SHUTDOWN, 1);
+    notify('Reboot command sent');
+  }
+});
+$('severity').addEventListener('change', () => refreshStatusLog(true));
+$('clear-log').addEventListener('click', () => { S.log = []; S.logSeq++; refreshStatusLog(true); });
+$('net-dhcp').addEventListener('change', updateNetFields);
+$('net-apply').addEventListener('click', applyNetwork);
+$('net-reload').addEventListener('click', reloadNetwork);
+
+// Safe shutdown: warn while parameter writes are unconfirmed, always release the port on exit.
+window.addEventListener('beforeunload', event => {
+  if (conn.port && paramFetching()) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+});
+window.addEventListener('pagehide', () => { if (conn.port) disconnect(); });
+
+if ('serial' in navigator) {
+  navigator.serial.addEventListener('disconnect', event => {
+    if (event.target === conn.port) {
+      notify('Board unplugged', 0);
+      disconnect();
+    }
+  });
+} else {
+  $('unsupported').hidden = false;
+  $('connect').disabled = true;
+}
+
+syncChannels($('rc'), []);
+syncChannels($('servo'), []);
+setConnectedUi(false);
+</script>
+</body>
+</html>

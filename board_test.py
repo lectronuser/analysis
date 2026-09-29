@@ -2,9 +2,11 @@ import ipaddress
 import math
 import os
 import re
+import signal
 import struct
 import sys
 import time
+import traceback
 
 os.environ.setdefault("MAVLINK20", "1")
 
@@ -31,6 +33,9 @@ PARAM_MAX_TRIES = 3
 STATUS_LOG_MAX = 1000
 LOG_TABLE_HEIGHT = 320
 PWM_MIN, PWM_MAX = 800, 2200
+READER_STOP_TIMEOUT_MS = 2000
+# Earth field strength limits used by ArduPilot's compass arming check (mGauss)
+MAG_FIELD_MIN, MAG_FIELD_MAX = 185, 875
 
 # Board specific wiring
 CM5_SERIAL_PORT = 3  # SERIAL3 = TELEM3 (USART2)
@@ -509,6 +514,7 @@ class MainWindow(QMainWindow):
 
         self.conn = None
         self.reader = None
+        self.closing = False
         self.reset_state()
 
         central = QWidget()
@@ -754,6 +760,7 @@ class MainWindow(QMainWindow):
         self.param_names = []
         self.param_tries = 0
         self.live = {}
+        self.mag_field = {}
         self.values = {}
         self.attitude = None
         self.power = None
@@ -849,10 +856,15 @@ class MainWindow(QMainWindow):
         self.notify(f"{port} opened, waiting for heartbeat...")
 
     def disconnect_board(self):
-        if self.reader:
-            self.reader.stop()
-            self.reader.wait(1000)
-            self.reader = None
+        for timer in (self.refresh_timer, self.heartbeat_timer, self.param_timer):
+            timer.stop()
+        reader, self.reader = self.reader, None
+        if reader:
+            reader.blockSignals(True)  # no more message or error callbacks into a half closed window
+            reader.stop()
+            if not reader.wait(READER_STOP_TIMEOUT_MS):
+                reader.terminate()
+                reader.wait()
         if self.conn:
             try:
                 self.conn.close()
@@ -1187,17 +1199,26 @@ class MainWindow(QMainWindow):
     def on_SYSTEM_TIME(self, m):
         self.version["uptime"] = format_uptime(m.time_boot_ms)
 
+    def set_mag(self, inst, msg, x, y, z, unit, to_mgauss=None, fmt="{:.0f}"):
+        self.set_live("mag", inst, msg, xyz(x, y, z, unit, fmt))
+        if to_mgauss is not None:
+            self.mag_field[inst] = math.sqrt(x * x + y * y + z * z) * to_mgauss
+
     def imu(self, inst, msg, m, unit_acc, unit_gyro, unit_mag):
         self.set_live("accel", inst, msg, xyz(m.xacc, m.yacc, m.zacc, unit_acc))
         self.set_live("gyro", inst, msg, xyz(m.xgyro, m.ygyro, m.zgyro, unit_gyro))
         if (m.xmag, m.ymag, m.zmag) != (0, 0, 0):
-            self.set_live("mag", inst, msg, xyz(m.xmag, m.ymag, m.zmag, unit_mag))
+            self.set_mag(inst, msg, m.xmag, m.ymag, m.zmag, unit_mag, 1.0 if unit_mag == "mGauss" else None)
         temp = getattr(m, "temperature", 0)
         if temp:
             self.set_live("temp", inst, msg, f"{temp / 100:.1f} C")
 
     def on_RAW_IMU(self, m):
-        self.imu(getattr(m, "id", 0), "RAW_IMU", m, "raw", "raw", "raw")
+        # ArduPilot fills RAW_IMU with scaled, calibrated values (same units as SCALED_IMU)
+        if self.autopilot == mavlink.MAV_AUTOPILOT_ARDUPILOTMEGA:
+            self.imu(getattr(m, "id", 0), "RAW_IMU", m, "mG", "mrad/s", "mGauss")
+        else:
+            self.imu(getattr(m, "id", 0), "RAW_IMU", m, "raw", "raw", "raw")
 
     def on_SCALED_IMU(self, m):
         self.imu(0, "SCALED_IMU", m, "mG", "mrad/s", "mGauss")
@@ -1212,7 +1233,7 @@ class MainWindow(QMainWindow):
         inst = getattr(m, "id", 0)
         self.set_live("accel", inst, "HIGHRES_IMU", xyz(m.xacc, m.yacc, m.zacc, "m/s2", "{:.2f}"))
         self.set_live("gyro", inst, "HIGHRES_IMU", xyz(m.xgyro, m.ygyro, m.zgyro, "rad/s", "{:.3f}"))
-        self.set_live("mag", inst, "HIGHRES_IMU", xyz(m.xmag, m.ymag, m.zmag, "Gauss", "{:.3f}"))
+        self.set_mag(inst, "HIGHRES_IMU", m.xmag, m.ymag, m.zmag, "Gauss", 1000.0, "{:.3f}")
         self.set_live("baro", inst, "HIGHRES_IMU", f"{m.abs_pressure:.2f} hPa   {m.temperature:.1f} C")
 
     def pressure(self, inst, msg, m):
@@ -1362,14 +1383,27 @@ class MainWindow(QMainWindow):
             for kind, label in parts:
                 rows.append((label, "", "", "", *live((kind, inst)), "child"))
 
-        for kind in ("mag", "baro"):
-            for inst in range(3):
-                dev = self.device_id(kind, inst)
-                if not dev and (kind, inst) not in self.live:
-                    continue
-                info = decode_device_id(dev, kind, ardupilot) if dev else empty
-                rows.append((f"{KIND_LABELS[kind]} {inst + 1}", info["chip"], info["bus"], info["address"],
-                             *live((kind, inst)), "single"))
+        for inst in range(3):
+            dev = self.device_id("mag", inst)
+            if not dev and ("mag", inst) not in self.live:
+                continue
+            info = decode_device_id(dev, "mag", ardupilot) if dev else empty
+            rows.append((f"Compass {inst + 1}", info["chip"], info["bus"], info["address"], "", None, "group"))
+            rows.append(("Field", "", "", "", *live(("mag", inst)), "child"))
+            field = self.mag_field.get(inst)
+            if field is not None:
+                text = f"{field:.0f} mGauss   (EMI check {MAG_FIELD_MIN}-{MAG_FIELD_MAX})"
+                bad = not MAG_FIELD_MIN <= field <= MAG_FIELD_MAX
+                rows.append(("MagField", "", "", "", text, timed(self.live[("mag", inst)][2],
+                                                               C["err"] if bad else C["ok"]), "child"))
+
+        for inst in range(3):
+            dev = self.device_id("baro", inst)
+            if not dev and ("baro", inst) not in self.live:
+                continue
+            info = decode_device_id(dev, "baro", ardupilot) if dev else empty
+            rows.append((f"Barometer {inst + 1}", info["chip"], info["bus"], info["address"],
+                         *live(("baro", inst)), "single"))
 
         ports = self.gps_ports()
         for inst in range(2):
@@ -1621,9 +1655,35 @@ class MainWindow(QMainWindow):
         if self.param_missing("NET_ENABLE"):
             set_label(self.net_status, "Board has no NET_* parameters (no Ethernet support)", C["muted"])
 
-    def closeEvent(self, event):
+    def shutdown(self):
+        if self.closing:
+            return
+        self.closing = True
         self.disconnect_board()
+
+    def closeEvent(self, event):
+        self.shutdown()
         super().closeEvent(event)
+
+
+def install_shutdown_handlers(app, window):
+    def on_signal(*_):
+        window.close()
+        app.quit()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, on_signal)
+    # Python only runs signal handlers when the interpreter gets control, so wake it up periodically
+    wake = QTimer(app)
+    wake.timeout.connect(lambda: None)
+    wake.start(200)
+    app.aboutToQuit.connect(window.shutdown)
+
+    def on_exception(exc_type, exc, tb):
+        traceback.print_exception(exc_type, exc, tb)
+        window.notify(f"Internal error: {exc_type.__name__}: {exc}", 0)
+
+    sys.excepthook = on_exception
 
 
 if __name__ == "__main__":
@@ -1631,5 +1691,6 @@ if __name__ == "__main__":
     app.setStyle("Fusion")
     app.setStyleSheet(STYLE)
     window = MainWindow()
+    install_shutdown_handlers(app, window)
     window.show()
     sys.exit(app.exec())
