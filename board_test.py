@@ -1,4 +1,7 @@
+import datetime
+import html
 import ipaddress
+import logging
 import math
 import os
 import re
@@ -12,15 +15,17 @@ os.environ.setdefault("MAVLINK20", "1")
 
 import serial.tools.list_ports
 from pymavlink import mavutil
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QMarginsF, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QColor, QPageLayout, QPageSize, QPdfWriter, QTextDocument
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout,
+    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame,
+    QGridLayout,
     QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-    QAbstractSpinBox, QScrollArea, QSpinBox, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractSpinBox, QScrollArea, QSlider, QSpinBox, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 mavlink = mavutil.mavlink
+file_log = logging.getLogger("board_test")
 
 APP_NAME = "Board Test"
 BAUD_RATES = ["9600", "57600", "115200", "230400", "460800", "921600"]
@@ -32,6 +37,8 @@ PARAM_RETRY_MS = 2000
 PARAM_MAX_TRIES = 3
 PORT_SCAN_MS = 1500
 STATUS_LOG_MAX = 1000
+# Warnings, errors, test results and internal exceptions are also kept on disk (one file per day)
+LOG_DIR = os.path.expanduser("~/board_test_logs")
 PWM_MIN, PWM_MAX = 800, 2200
 READER_STOP_TIMEOUT_MS = 2000
 # Earth field strength limits used by ArduPilot's compass arming check (mGauss)
@@ -47,6 +54,8 @@ TEST_TIMEOUT_S = 25.0      # time a port test waits for data after the reboot
 PARAM_LIST_IDLE_S = 1.5   # full parameter download: re-request missing indices after this pause
 PARAM_LIST_TRIES = 5
 PARAM_LIST_BATCH = 40     # missing parameters re-requested per round
+PARAM_TABLE_HEIGHT = 520
+MOTOR_TEST_MAX_THROTTLE = 40  # % throttle cap for bench tests
 
 # ---- Lectron Pi5-H7 --------------------------------------------------------------------------
 # hwdef: SERIAL_ORDER OTG1 UART7 UART5 USART1 UART8 USART2 UART4 USART3, IOMCU on USART6
@@ -96,6 +105,14 @@ QLabel {{ background: transparent; }}
 #kvValue {{ font-family: "JetBrains Mono", "Fira Code", monospace; font-weight: 600; }}
 #warning {{ color: {C['warn']}; background: rgba(245, 158, 11, 30); border-radius: 6px; padding: 8px 10px; }}
 #bigText {{ font-size: 16px; font-weight: 700; }}
+#sectionTitle {{ font-size: 17px; font-weight: 700; padding-top: 8px; }}
+#sliderValue {{ font-family: "JetBrains Mono", "Fira Code", monospace; font-size: 18px; font-weight: 700; color: {C['accent']}; }}
+QSlider::groove:horizontal {{ height: 6px; background: {C['surface2']}; border-radius: 3px; }}
+QSlider::sub-page:horizontal {{ background: {C['accent']}; border-radius: 3px; }}
+QSlider::handle:horizontal {{ background: white; width: 18px; height: 18px; margin: -7px 0; border-radius: 9px; }}
+QSlider::handle:horizontal:disabled {{ background: {C['off']}; }}
+QSlider::sub-page:horizontal:disabled {{ background: {C['off']}; }}
+QDialog {{ background: {C['surface']}; }}
 QPushButton {{ background: {C['surface2']}; border: 1px solid {C['border']}; border-radius: 6px; padding: 6px 14px; }}
 QPushButton:hover {{ background: {C['hover']}; border-color: {C['border_hover']}; }}
 QPushButton:disabled {{ color: {C['off']}; background: {C['surface2']}; border-color: {C['border']}; }}
@@ -222,12 +239,6 @@ IMU_PARTS = (("accel", "Accelerometer"), ("gyro", "Gyroscope"), ("temp", "Temper
 INT_TYPES = (mavlink.MAV_PARAM_TYPE_INT8, mavlink.MAV_PARAM_TYPE_INT16, mavlink.MAV_PARAM_TYPE_INT32,
              mavlink.MAV_PARAM_TYPE_UINT8, mavlink.MAV_PARAM_TYPE_UINT16, mavlink.MAV_PARAM_TYPE_UINT32)
 
-ACCEL_POSITIONS = {1: "LEVEL", 2: "on its LEFT side", 3: "on its RIGHT side", 4: "NOSE DOWN", 5: "NOSE UP",
-                   6: "on its BACK"}
-ACCELCAL_SUCCESS, ACCELCAL_FAILED = 16777215, 16777216
-MAG_CAL_STATUS = {0: "Not started", 1: "Waiting to start", 2: "Running (step 1)", 3: "Running (step 2)",
-                  4: "Success", 5: "Failed", 6: "Bad orientation", 7: "Bad radius"}
-
 AP_DEVICE_PARAMS = {
     "accel": ["INS_ACC_ID", "INS_ACC2_ID", "INS_ACC3_ID"],
     "gyro": ["INS_GYR_ID", "INS_GYR2_ID", "INS_GYR3_ID"],
@@ -342,9 +353,9 @@ PORT_TESTS = [
     {"key": "spi6", "connector": "PX_SPI1", "function": "SPI6", "devices": ["manual"],
      "hint": "Connect the SPI6 test device and check it on the scope / its own output"},
     {"key": "io_pwm", "connector": "IO_PWM1", "function": "MAIN 1-8 (IO)", "devices": ["manual"],
-     "hint": "Drive the outputs from Settings → Motors → Motor Test or a servo tester"},
+     "hint": "Drive the outputs from the Motors page (Motor Test) or a servo tester"},
     {"key": "fmu_pwm", "connector": "FMU_PWM1", "function": "AUX 1-8 (FMU)", "devices": ["manual"],
-     "hint": "Drive the outputs from Settings → Motors → Motor Test or a servo tester"},
+     "hint": "Drive the outputs from the Motors page (Motor Test) or a servo tester"},
     {"key": "fmu_debug", "connector": "FMU_DEBUG1", "function": "USART3 · SWD", "devices": ["manual"],
      "hint": "Attach the debug probe and read the FMU (SWD) / debug console"},
     {"key": "io_debug", "connector": "IO_DEBUG1", "function": "IO USART1 · SWD", "devices": ["manual"],
@@ -700,10 +711,54 @@ class NavButton(QPushButton):
             label.setStyleSheet(f"color: {color}; font-size: {label.property('font_px')}px; font-weight: {weight};")
 
 
+class ReportDialog(QDialog):
+    """Asks who ran the test and which board it was before the PDF report is written."""
+
+    def __init__(self, parent, name="", board_id=""):
+        super().__init__(parent)
+        self.setWindowTitle("Create Test Report")
+        self.setMinimumWidth(420)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 18, 20, 18)
+        lay.setSpacing(12)
+        title = QLabel("Test Report")
+        title.setObjectName("bigText")
+        lay.addWidget(title)
+        lay.addWidget(muted_label("The date and time are added automatically.", wrap=True))
+        self.name = QLineEdit(name)
+        self.name.setPlaceholderText("Name Surname")
+        self.board_id = QLineEdit(board_id)
+        self.board_id.setPlaceholderText("Serial number on the board label")
+        form = QGridLayout()
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(8)
+        form.addWidget(muted_label("Name Surname"), 0, 0)
+        form.addWidget(self.name, 0, 1)
+        form.addWidget(muted_label("Board ID"), 1, 0)
+        form.addWidget(self.board_id, 1, 1)
+        lay.addLayout(form)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.button(QDialogButtonBox.Ok).setText("Create PDF")
+        self.buttons.button(QDialogButtonBox.Ok).setObjectName("primary")
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        lay.addWidget(self.buttons)
+        for field in (self.name, self.board_id):
+            field.textChanged.connect(self.update_ok)
+        self.update_ok()
+
+    def update_ok(self):
+        ok = bool(self.name.text().strip() and self.board_id.text().strip())
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(ok)
+
+    def values(self):
+        return self.name.text().strip(), self.board_id.text().strip()
+
+
 class MainWindow(QMainWindow):
-    PAGES = (("Board", "\u25a3"), ("Settings", "\u2699"), ("Parameters", "\u25a4"), ("Live Data", "\u223f"),
-             ("Messages", "\u2630"))
-    PAGE_BOARD, PAGE_SETTINGS, PAGE_PARAMS, PAGE_LIVE, PAGE_MESSAGES = range(5)
+    PAGES = (("Board", "\u25a3"), ("Test", "\u2714"), ("Motors", "\u2742"), ("Settings", "\u2699"),
+             ("Live Data", "\u223f"), ("Messages", "\u2630"))
+    PAGE_BOARD, PAGE_TEST, PAGE_MOTORS, PAGE_SETTINGS, PAGE_LIVE, PAGE_MESSAGES = range(6)
 
     def __init__(self):
         super().__init__()
@@ -723,6 +778,7 @@ class MainWindow(QMainWindow):
         self.port_backup = {}    # parameter values changed by port tests, for "Restore ports"
         self.cmd_labels = {}     # MAV_CMD -> label that shows its COMMAND_ACK
         self.status_log = []
+        self.exception_counts = {}
         self.status_seq = 0
         self.reset_state()
 
@@ -743,8 +799,9 @@ class MainWindow(QMainWindow):
         body.addWidget(self.stack, 1)
         root.addLayout(body, 1)
         self.stack.addWidget(self.build_board_page())
+        self.stack.addWidget(self.build_test_page())
+        self.stack.addWidget(self.build_motors_page())
         self.stack.addWidget(self.build_settings_page())
-        self.stack.addWidget(self.build_params_page())
         self.stack.addWidget(self.build_live_page())
         self.stack.addWidget(self.build_messages_page())
         self.nav_group.idClicked.connect(self.show_page)
@@ -925,6 +982,10 @@ class MainWindow(QMainWindow):
         self.severity_box.currentIndexChanged.connect(lambda _: self.refresh_status_log())
         clear_btn = QPushButton("Clear")
         clear_btn.clicked.connect(self.clear_status_log)
+        log_label = QLabel(f"Log file: {log_path()}")
+        log_label.setObjectName("pageSubtitle")
+        log_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        head.addWidget(log_label)
         head.addWidget(self.severity_box)
         head.addWidget(clear_btn)
         card = Card("Messages")
@@ -933,17 +994,16 @@ class MainWindow(QMainWindow):
         lay.addWidget(card, 1)
         return page
 
-    # ---- parameters page --------------------------------------------------------------------
+    # ---- all parameters (settings page) -------------------------------------------------------
 
-    def build_params_page(self):
-        page, lay, head = self.page_layout("Parameters", "Every parameter on the board: search, edit, save and load",
-                                           scroll=False)
+    def build_params_section(self, lay):
+        card = Card("All Parameters")
         self.param_load_label = muted_label()
         self.param_load_btn = QPushButton("Refresh All")
         self.param_load_btn.clicked.connect(self.load_all_params)
-        head.addWidget(self.param_load_label)
-        head.addSpacing(10)
-        head.addWidget(self.param_load_btn)
+        card.head.addWidget(self.param_load_label)
+        card.head.addSpacing(10)
+        card.head.addWidget(self.param_load_btn)
 
         bar = QHBoxLayout()
         self.param_search = QLineEdit()
@@ -960,18 +1020,17 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.param_modified_only)
         bar.addWidget(self.param_load_file_btn)
         bar.addWidget(self.param_save_file_btn)
-        lay.addLayout(bar)
+        card.body.addLayout(bar)
 
-        card = Card("Parameters")
         self.param_table = make_table(["Name", "Value", "Board Value", "Type"], 0)
         self.param_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked
                                          | QAbstractItemView.EditKeyPressed | QAbstractItemView.AnyKeyPressed)
         self.param_table.setFocusPolicy(Qt.StrongFocus)
         self.param_table.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.param_table.itemChanged.connect(self.on_param_edited)
+        self.param_table.setFixedHeight(PARAM_TABLE_HEIGHT)
         fixed_columns(self.param_table, {1: 180, 2: 180, 3: 90})
         card.body.addWidget(self.param_table)
-        lay.addWidget(card, 1)
 
         foot = QHBoxLayout()
         self.param_edit_label = muted_label(wrap=True)
@@ -986,12 +1045,25 @@ class MainWindow(QMainWindow):
         foot.addWidget(self.param_reboot)
         foot.addWidget(self.param_revert_btn)
         foot.addWidget(self.param_write_btn)
-        lay.addLayout(foot)
+        card.body.addLayout(foot)
+
+        tools = QHBoxLayout()
+        self.params_status = muted_label(wrap=True)
+        self.reset_params_btn = QPushButton("Reset to Defaults")
+        self.reset_params_btn.setObjectName("danger")
+        self.reset_params_btn.setToolTip("Erase every parameter and reboot the board with its defaults")
+        self.reset_params_btn.clicked.connect(self.reset_parameters)
+        self.reboot_btn = QPushButton("Reboot && Reconnect")
+        self.reboot_btn.clicked.connect(lambda: self.start_job([], title="Reboot"))
+        tools.addWidget(self.params_status, 1)
+        tools.addWidget(self.reset_params_btn)
+        tools.addWidget(self.reboot_btn)
+        card.body.addLayout(tools)
+        lay.addWidget(card)
 
         self.param_rows = {}
         self.param_edits = {}    # name -> text typed by the user, until the board reports that value
         self.params_shown = None
-        return page
 
     def load_all_params(self):
         if not self.target:
@@ -1005,7 +1077,7 @@ class MainWindow(QMainWindow):
     def full_load_tick(self):
         load = self.full_load
         if not load:
-            if (self.stack.currentIndex() == self.PAGE_PARAMS and not self.full_loaded and self.target
+            if (self.stack.currentIndex() == self.PAGE_SETTINGS and not self.full_loaded and self.target
                     and self.params_ready() and not self.job):
                 self.load_all_params()
             return
@@ -1219,39 +1291,41 @@ class MainWindow(QMainWindow):
 
     # ---- settings page ----------------------------------------------------------------------
 
+    @staticmethod
+    def section_title(lay, text):
+        title = QLabel(text)
+        title.setObjectName("sectionTitle")
+        lay.addWidget(title)
+
     def build_settings_page(self):
-        page, lay, head = self.page_layout("Settings", "Board tests, network, motors, serial ports and calibration",
-                                           scroll=False)
+        area, lay, head = self.page_layout("Settings", "Ethernet, serial ports and every board parameter")
         self.settings_param_label = muted_label()
         self.read_params_btn = QPushButton("Read Parameters")
         self.read_params_btn.clicked.connect(self.start_param_fetch)
         head.addWidget(self.settings_param_label)
         head.addSpacing(10)
         head.addWidget(self.read_params_btn)
+        self.section_title(lay, "Ethernet")
+        self.build_general_tab(lay)
+        self.section_title(lay, "Ports")
+        self.build_ports_tab(lay)
+        self.section_title(lay, "Parameters")
+        self.build_params_section(lay)
+        lay.addStretch()
+        return area
 
-        tabs = QHBoxLayout()
-        tabs.setSpacing(4)
-        self.settings_group = QButtonGroup(self)
-        self.settings_stack = QStackedWidget()
-        builders = (("Sensors", self.build_tests_tab), ("General", self.build_general_tab),
-                    ("Motors", self.build_motors_tab), ("Ports", self.build_ports_tab),
-                    ("Calibration", self.build_calibration_tab))
-        for i, (name, build) in enumerate(builders):
-            btn = QPushButton(name)
-            btn.setObjectName("tab")
-            btn.setCheckable(True)
-            btn.setChecked(i == 0)
-            self.settings_group.addButton(btn, i)
-            tabs.addWidget(btn)
-            area, body = self.scroll_body()
-            build(body)
-            body.addStretch()
-            self.settings_stack.addWidget(area)
-        tabs.addStretch()
-        self.settings_group.idClicked.connect(self.settings_stack.setCurrentIndex)
-        lay.addLayout(tabs)
-        lay.addWidget(self.settings_stack, 1)
-        return page
+    def build_test_page(self):
+        self.test_area, lay, head = self.page_layout("Test", "Port by port board test, pinouts and the test report")
+        self.build_tests_tab(lay)
+        self.build_report_card(lay)
+        lay.addStretch()
+        return self.test_area
+
+    def build_motors_page(self):
+        area, lay, head = self.page_layout("Motors", "Frame, ESC protocol, output assignment and motor test")
+        self.build_motors_tab(lay)
+        lay.addStretch()
+        return area
 
     def build_tests_tab(self, lay):
         card = Card("Port Tests", BOARD_NAME)
@@ -1360,7 +1434,7 @@ class MainWindow(QMainWindow):
             set_cell(table, i, 2, voltage, colors.get(voltage, C["accent"]))
         fit_table_height(table)
         if scroll:
-            self.settings_stack.widget(0).ensureWidgetVisible(self.pinout_card)
+            self.test_area.ensureWidgetVisible(self.pinout_card)
 
     def build_general_tab(self, lay):
         row = QHBoxLayout()
@@ -1446,9 +1520,23 @@ class MainWindow(QMainWindow):
         self.props_off = QCheckBox("Propellers are removed")
         self.props_off.toggled.connect(self.update_motor_test_buttons)
         test.body.addWidget(self.props_off)
-        self.motor_throttle = make_spin(1, 40, 7, " %")
+        throttle_row = QHBoxLayout()
+        self.motor_throttle = QSlider(Qt.Horizontal)
+        self.motor_throttle.setRange(1, MOTOR_TEST_MAX_THROTTLE)
+        self.motor_throttle.setValue(7)
+        self.motor_throttle.setPageStep(5)
+        self.throttle_label = QLabel()
+        self.throttle_label.setObjectName("sliderValue")
+        self.throttle_label.setMinimumWidth(64)
+        self.throttle_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.motor_throttle.valueChanged.connect(lambda v: self.throttle_label.setText(f"{v} %"))
+        self.throttle_label.setText(f"{self.motor_throttle.value()} %")
+        throttle_row.addWidget(self.motor_throttle, 1)
+        throttle_row.addWidget(self.throttle_label)
         self.motor_duration = make_spin(1, 10, 2, " s")
-        test.body.addLayout(self.form_grid([("Throttle", self.motor_throttle), ("Duration", self.motor_duration)]))
+        test.body.addWidget(muted_label("Throttle"))
+        test.body.addLayout(throttle_row)
+        test.body.addLayout(self.form_grid([("Duration", self.motor_duration)]))
         buttons = QGridLayout()
         buttons.setSpacing(8)
         self.motor_buttons = []
@@ -1540,106 +1628,6 @@ class MainWindow(QMainWindow):
         foot.addWidget(self.ports_apply_btn)
         lay.addLayout(foot)
 
-    def build_calibration_tab(self, lay):
-        grid = QGridLayout()
-        grid.setSpacing(16)
-
-        accel = Card("Accelerometer")
-        self.accel_text = QLabel("Six position calibration. Start, then place the board as asked and press Next.")
-        self.accel_text.setObjectName("bigText")
-        self.accel_text.setWordWrap(True)
-        accel.body.addWidget(self.accel_text)
-        row = QHBoxLayout()
-        self.accel_start_btn = QPushButton("Start")
-        self.accel_start_btn.setObjectName("primary")
-        self.accel_start_btn.clicked.connect(self.accel_cal_start)
-        self.accel_next_btn = QPushButton("Next")
-        self.accel_next_btn.setEnabled(False)
-        self.accel_next_btn.clicked.connect(self.accel_cal_next)
-        self.level_btn = QPushButton("Level Only")
-        self.level_btn.setToolTip("Board level (AHRS trim), board must sit level")
-        self.level_btn.clicked.connect(lambda: self.calibrate("level", self.accel_status, param5=2))
-        row.addWidget(self.accel_start_btn)
-        row.addWidget(self.accel_next_btn)
-        row.addWidget(self.level_btn)
-        row.addStretch()
-        accel.body.addLayout(row)
-        self.accel_status = muted_label(wrap=True)
-        accel.body.addWidget(self.accel_status)
-        accel.body.addStretch()
-
-        compass = Card("Compass")
-        compass.body.addWidget(muted_label("Onboard calibration: rotate the board around every axis until all bars "
-                                           "are full. Results are saved automatically.", wrap=True))
-        self.mag_bars = []
-        for i in range(3):
-            row = QHBoxLayout()
-            label = muted_label(f"Compass {i + 1}")
-            bar = QProgressBar()
-            bar.setRange(0, 100)
-            bar.setFixedHeight(8)
-            bar.setTextVisible(False)
-            state = muted_label("-")
-            state.setMinimumWidth(170)
-            row.addWidget(label)
-            row.addWidget(bar, 1)
-            row.addWidget(state)
-            compass.body.addLayout(row)
-            self.mag_bars.append((label, bar, state))
-        row = QHBoxLayout()
-        self.mag_start_btn = QPushButton("Start")
-        self.mag_start_btn.setObjectName("primary")
-        self.mag_start_btn.clicked.connect(self.mag_cal_start)
-        self.mag_cancel_btn = QPushButton("Cancel")
-        self.mag_cancel_btn.clicked.connect(self.mag_cal_cancel)
-        row.addWidget(self.mag_start_btn)
-        row.addWidget(self.mag_cancel_btn)
-        row.addStretch()
-        compass.body.addLayout(row)
-        self.mag_status = muted_label(wrap=True)
-        compass.body.addWidget(self.mag_status)
-        compass.body.addStretch()
-
-        sensors = Card("Gyro & Barometer")
-        sensors.body.addWidget(muted_label("Keep the board still during gyro calibration.", wrap=True))
-        row = QHBoxLayout()
-        self.gyro_btn = QPushButton("Calibrate Gyro")
-        self.gyro_btn.clicked.connect(lambda: self.calibrate("gyro", self.sensor_cal_status, param1=1))
-        self.baro_btn = QPushButton("Calibrate Baro")
-        self.baro_btn.clicked.connect(lambda: self.calibrate("baro", self.sensor_cal_status, param3=1))
-        row.addWidget(self.gyro_btn)
-        row.addWidget(self.baro_btn)
-        row.addStretch()
-        sensors.body.addLayout(row)
-        self.sensor_cal_status = muted_label(wrap=True)
-        sensors.body.addWidget(self.sensor_cal_status)
-        sensors.body.addStretch()
-
-        params = Card("Parameters & Reboot")
-        params.body.addWidget(muted_label("Reset erases every parameter (including calibration) and reboots the "
-                                          "board with its defaults.", wrap=True))
-        row = QHBoxLayout()
-        self.reset_params_btn = QPushButton("Reset to Defaults")
-        self.reset_params_btn.setObjectName("danger")
-        self.reset_params_btn.clicked.connect(self.reset_parameters)
-        self.reboot_btn = QPushButton("Reboot && Reconnect")
-        self.reboot_btn.clicked.connect(lambda: self.start_job([], title="Reboot"))
-        row.addWidget(self.reset_params_btn)
-        row.addWidget(self.reboot_btn)
-        row.addStretch()
-        params.body.addLayout(row)
-        self.params_status = muted_label(wrap=True)
-        params.body.addWidget(self.params_status)
-        params.body.addStretch()
-
-        grid.addWidget(accel, 0, 0)
-        grid.addWidget(compass, 0, 1)
-        grid.addWidget(sensors, 1, 0)
-        grid.addWidget(params, 1, 1)
-        for col in range(2):
-            grid.setColumnStretch(col, 1)
-        lay.addLayout(grid)
-
     # ---- state ------------------------------------------------------------------------------
 
     def reset_state(self):
@@ -1670,7 +1658,6 @@ class MainWindow(QMainWindow):
         self.net_loaded = False
         self.ports_loaded = False
         self.motors_loaded = False
-        self.accel_pos = None
         self.reset_pending = False
         self.param_count = 0
         self.param_indices = set()
@@ -1681,11 +1668,29 @@ class MainWindow(QMainWindow):
     def notify(self, text, ms=8000):
         self.statusBar().showMessage(text, ms)
 
-    def add_log(self, severity, text):
+    def add_log(self, severity, text, persist=False):
         name = enum_name("MAV_SEVERITY", severity, "MAV_SEVERITY_")
         self.status_log.append((time.strftime("%H:%M:%S"), severity, name, text))
         del self.status_log[:-STATUS_LOG_MAX]
         self.status_seq += 1
+        if persist or severity <= mavlink.MAV_SEVERITY_WARNING:
+            level = logging.ERROR if severity <= mavlink.MAV_SEVERITY_ERROR else (
+                logging.WARNING if severity == mavlink.MAV_SEVERITY_WARNING else logging.INFO)
+            file_log.log(level, "[%s] %s", name, text)
+
+    def log_exception(self, exc_type, exc, tb):
+        """Log an internal error once; repeats (e.g. from the refresh timer) are only counted. True if new."""
+        text = "".join(traceback.format_exception(exc_type, exc, tb))
+        count = self.exception_counts.get(text, 0) + 1
+        self.exception_counts[text] = count
+        if count == 1:
+            context = f"port={self.port_box.currentText() or '-'} connected={bool(self.target)} " \
+                      f"test={self.active_test or '-'}"
+            file_log.error("Internal error (%s)\n%s", context, text.rstrip())
+            self.add_log(mavlink.MAV_SEVERITY_CRITICAL, f"Internal error: {exc_type.__name__}: {exc}")
+        elif count in (10, 100, 1000):
+            file_log.error("Internal error repeated %d times: %s: %s", count, exc_type.__name__, exc)
+        return count == 1
 
     def clear_status_log(self):
         self.status_log = []
@@ -1695,8 +1700,7 @@ class MainWindow(QMainWindow):
     def link_buttons(self):
         return [self.reload_btn, self.read_params_btn, self.param_load_btn, self.net_reload_btn, self.net_apply_btn,
                 self.motors_reload_btn, self.motors_apply_btn, self.ports_reload_btn, self.ports_apply_btn,
-                self.accel_start_btn, self.level_btn, self.mag_start_btn, self.mag_cancel_btn, self.gyro_btn,
-                self.baro_btn, self.reset_params_btn, self.reboot_btn, self.restore_ports_btn]
+                self.reset_params_btn, self.reboot_btn, self.restore_ports_btn]
 
     def set_connected_ui(self, connected):
         self.connect_btn.setText("Disconnect" if connected else "Connect")
@@ -1707,8 +1711,6 @@ class MainWindow(QMainWindow):
         self.baud_box.setEnabled(not connected)
         for btn in self.link_buttons():
             btn.setEnabled(connected)
-        if not connected:
-            self.accel_next_btn.setEnabled(False)
         self.update_motor_test_buttons()
         if connected:
             self.refresh_timer.start()
@@ -1842,9 +1844,6 @@ class MainWindow(QMainWindow):
         self.net_mac.setText("-")
         for label in (self.param_label, self.settings_param_label):
             label.setText("")
-        for _, bar, state in self.mag_bars:
-            bar.setValue(0)
-            state.setText("-")
         self.param_table.setRowCount(0)
         self.param_rows = {}
         self.param_edits = {}
@@ -1892,7 +1891,7 @@ class MainWindow(QMainWindow):
 
     def job_tick(self):
         self.check_active_test()
-        if self.stack.currentIndex() == self.PAGE_SETTINGS and self.settings_stack.currentIndex() == 0:
+        if self.stack.currentIndex() == self.PAGE_TEST:
             self.refresh_tests()
         job = self.job
         if not job:
@@ -1954,6 +1953,8 @@ class MainWindow(QMainWindow):
         if self.job:
             self.job = None
             if self.active_test:
+                name = self.test_name(TESTS_BY_KEY[self.active_test])
+                self.add_log(mavlink.MAV_SEVERITY_WARNING, f"Port test {name}: cancelled ({reason})")
                 self.set_test_result(self.active_test, "idle", reason)
 
     # ---- parameters -------------------------------------------------------------------------
@@ -2183,40 +2184,6 @@ class MainWindow(QMainWindow):
             if good:
                 self.start_job([], title="Parameter reset")
 
-    def on_COMMAND_LONG(self, m):
-        # the autopilot drives the six position accel calibration with this command
-        if m.command != mavlink.MAV_CMD_ACCELCAL_VEHICLE_POS:
-            return
-        pos = int(m.param1)
-        if pos == ACCELCAL_SUCCESS:
-            self.accel_pos = None
-            set_label(self.accel_text, "Accelerometer calibration successful", C["ok"])
-        elif pos == ACCELCAL_FAILED:
-            self.accel_pos = None
-            set_label(self.accel_text, "Accelerometer calibration FAILED", C["err"])
-        elif pos in ACCEL_POSITIONS:
-            self.accel_pos = pos
-            set_label(self.accel_text, f"Place the board {ACCEL_POSITIONS[pos]} and press Next", C["accent"])
-        self.accel_next_btn.setEnabled(self.accel_pos is not None)
-
-    def on_MAG_CAL_PROGRESS(self, m):
-        if m.compass_id < len(self.mag_bars):
-            _, bar, state = self.mag_bars[m.compass_id]
-            bar.setValue(m.completion_pct)
-            set_label(state, f"{MAG_CAL_STATUS.get(m.cal_status, m.cal_status)}  {m.completion_pct}%")
-
-    def on_MAG_CAL_REPORT(self, m):
-        if m.compass_id >= len(self.mag_bars):
-            return
-        _, bar, state = self.mag_bars[m.compass_id]
-        ok = m.cal_status == mavlink.MAG_CAL_SUCCESS
-        bar.setValue(100 if ok else bar.value())
-        saved = ", saved" if m.autosaved else ""
-        set_label(state, f"{MAG_CAL_STATUS.get(m.cal_status, m.cal_status)}  fitness {m.fitness:.1f}{saved}",
-                  C["ok"] if ok else C["err"])
-        if ok:
-            set_label(self.mag_status, "Calibration saved. Reboot the board to use the new offsets.", C["ok"])
-
     def on_PARAM_VALUE(self, m):
         name = m.param_id.rstrip("\x00") if isinstance(m.param_id, str) else m.param_id.decode().rstrip("\x00")
         value = m.param_value
@@ -2378,10 +2345,12 @@ class MainWindow(QMainWindow):
         if page == self.PAGE_BOARD:
             self.refresh_board()
             self.refresh_onboard()
+        elif page == self.PAGE_TEST:
+            self.refresh_tests()
+        elif page == self.PAGE_MOTORS:
+            self.refresh_motors()
         elif page == self.PAGE_SETTINGS:
             self.refresh_settings()
-        elif page == self.PAGE_PARAMS:
-            self.refresh_params()
         elif page == self.PAGE_LIVE:
             self.refresh_live()
         else:
@@ -2715,20 +2684,17 @@ class MainWindow(QMainWindow):
         table.scrollToBottom()
 
     def refresh_settings(self):
-        tab = self.settings_stack.currentIndex()
-        if tab == 0:
-            self.refresh_tests()
-        elif tab == 1:
-            self.load_network()
-            if self.param_missing("NET_ENABLE"):
-                set_label(self.net_status, "Board has no NET_* parameters (no Ethernet support)", C["muted"])
-        elif tab == 2:
-            self.load_motors()
-            for i in range(16):
-                pwm = self.servo_all[i] if i < len(self.servo_all) else 0
-                set_cell(self.output_table, i, 5, str(pwm) if pwm else "-", None if pwm else C["muted"])
-        elif tab == 3:
-            self.load_ports()
+        self.load_network()
+        if self.param_missing("NET_ENABLE"):
+            set_label(self.net_status, "Board has no NET_* parameters (no Ethernet support)", C["muted"])
+        self.load_ports()
+        self.refresh_params()
+
+    def refresh_motors(self):
+        self.load_motors()
+        for i in range(16):
+            pwm = self.servo_all[i] if i < len(self.servo_all) else 0
+            set_cell(self.output_table, i, 5, str(pwm) if pwm else "-", None if pwm else C["muted"])
 
     # ---- settings: general ------------------------------------------------------------------
 
@@ -2811,7 +2777,7 @@ class MainWindow(QMainWindow):
 
     def update_motor_test_buttons(self):
         enabled = bool(self.conn) and self.props_off.isChecked()
-        for btn in (*self.motor_buttons, self.motor_all_btn):
+        for btn in (*self.motor_buttons, self.motor_all_btn, self.motor_throttle):
             btn.setEnabled(enabled)
         self.motor_stop_btn.setEnabled(bool(self.conn))
 
@@ -2850,36 +2816,7 @@ class MainWindow(QMainWindow):
             pairs += [(f"SERIAL{n}_PROTOCOL", protocol.currentData()), (f"SERIAL{n}_BAUD", baud.currentData())]
         set_label(self.ports_status, *self.apply_and_reboot(pairs, "Ports"))
 
-    # ---- settings: calibration --------------------------------------------------------------
-
-    def calibrate(self, what, label, param1=0, param3=0, param5=0):
-        # MAV_CMD_PREFLIGHT_CALIBRATION: 1 gyro, 3 baro (ground pressure), 5 accel (1 six position, 2 level)
-        self.send_command(mavlink.MAV_CMD_PREFLIGHT_CALIBRATION, param1, 0, param3, 0, param5, 0, 0, label=label)
-        set_label(label, f"{what.title()} calibration started…", C["accent"])
-
-    def accel_cal_start(self):
-        self.accel_pos = None
-        self.accel_next_btn.setEnabled(False)
-        set_label(self.accel_text, "Starting…", C["accent"])
-        self.calibrate("accelerometer", self.accel_status, param5=1)
-
-    def accel_cal_next(self):
-        if self.accel_pos is None:
-            return
-        self.send_command(mavlink.MAV_CMD_ACCELCAL_VEHICLE_POS, self.accel_pos)
-        self.accel_next_btn.setEnabled(False)
-        set_label(self.accel_text, "Sampling, keep the board still…", C["accent"])
-
-    def mag_cal_start(self):
-        for _, bar, state in self.mag_bars:
-            bar.setValue(0)
-            set_label(state, "-")
-        # param1 compass mask (0 = all), param2 retry on failure, param3 autosave, param4 delay, param5 autoreboot
-        self.send_command(mavlink.MAV_CMD_DO_START_MAG_CAL, 0, 1, 1, 0, 0, label=self.mag_status)
-        set_label(self.mag_status, "Rotate the board around all axes…", C["accent"])
-
-    def mag_cal_cancel(self):
-        self.send_command(mavlink.MAV_CMD_DO_CANCEL_MAG_CAL, 0, label=self.mag_status)
+    # ---- parameters: reset ------------------------------------------------------------------
 
     def reset_parameters(self):
         answer = QMessageBox.question(self, "Reset Parameters",
@@ -3068,7 +3005,7 @@ class MainWindow(QMainWindow):
         if result in ("pass", "fail"):
             name = self.test_name(TESTS_BY_KEY[key])
             self.add_log(mavlink.MAV_SEVERITY_INFO if result == "pass" else mavlink.MAV_SEVERITY_ERROR,
-                         f"Port test {name}: {result.upper()} ({detail})")
+                         f"Port test {name}: {result.upper()} ({detail})", persist=True)
 
     def reset_tests(self):
         self.stop_eth_probe()
@@ -3109,6 +3046,232 @@ class MainWindow(QMainWindow):
         self.restore_ports_btn.setText(f"Restore Ports ({len(self.port_backup)})" if self.port_backup
                                        else "Restore Ports")
 
+    # ---- test report ------------------------------------------------------------------------
+
+    def build_report_card(self, lay):
+        card = Card("Test Report", "PDF")
+        card.body.addWidget(muted_label(
+            "Creates a PDF with the board information, detected sensors and serial ports, the onboard hardware "
+            "table, the port test results and the live data. The date is added automatically; you enter your "
+            "name and the board ID.", wrap=True))
+        row = QHBoxLayout()
+        self.report_status = muted_label(wrap=True)
+        self.report_btn = QPushButton("Create Report")
+        self.report_btn.setObjectName("primary")
+        self.report_btn.clicked.connect(self.create_report)
+        row.addWidget(self.report_status, 1)
+        row.addWidget(self.report_btn)
+        card.body.addLayout(row)
+        lay.addWidget(card)
+        self.report_operator = ""
+        self.report_dir = os.path.expanduser("~")
+
+    def create_report(self):
+        if not self.target and QMessageBox.question(
+                self, "Create Test Report", "No board is connected, the report will have no board data. "
+                                            "Create it anyway?") != QMessageBox.Yes:
+            return
+        dialog = ReportDialog(self, self.report_operator)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        operator, board_id = dialog.values()
+        self.report_operator = operator
+        now = datetime.datetime.now()
+        safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", board_id)
+        default = os.path.join(self.report_dir, f"BoardTest_{safe_id}_{now:%Y%m%d_%H%M%S}.pdf")
+        path, _ = QFileDialog.getSaveFileName(self, "Save Test Report", default, "PDF files (*.pdf)")
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        self.report_dir = os.path.dirname(path)
+        try:
+            self.write_report_pdf(path, operator, board_id, now)
+        except Exception as e:
+            set_label(self.report_status, f"Could not write the report: {e}", C["err"])
+            return
+        set_label(self.report_status, f"Saved {path}", C["ok"])
+        self.add_log(mavlink.MAV_SEVERITY_INFO, f"Test report saved: {path}")
+
+    def test_result_counts(self):
+        states = [self.tests[t["key"]]["state"] for t in PORT_TESTS]
+        passed = sum(st in ("pass", "na") for st in states)
+        failed = sum(st == "fail" for st in states)
+        return passed, failed, len(states)
+
+    def report_sections(self):
+        """(title, headers, rows, note) for each report table; rows are lists of (text, color) cells."""
+        muted = C["muted"]
+        sections = []
+
+        board = [[(key, muted), (label.text(), None)] for key, label in self.board_card.values.items()]
+        board.append([("Connection", muted), (f"{self.port_device or '-'} @ {self.port_baud or '-'}", None)])
+        sections.append(("Board Information", ["Item", "Value"], board, ""))
+
+        sections.append(("Detected Sensors", ["Sensor", "Chip", "Bus", "Address / Port", "Reading"],
+                         self.report_sensor_rows(), ""))
+
+        ports = []
+        for n, (connector, uart) in SERIAL_PORTS.items():
+            proto = self.param_value(f"SERIAL{n}_PROTOCOL")
+            baud = self.param_value(f"SERIAL{n}_BAUD")
+            proto_text = SERIAL_PROTOCOLS.get(int(proto), f"Protocol {int(proto)}") if proto is not None else "-"
+            baud_text = str(SERIAL_BAUDS.get(int(baud), baud)) if baud is not None else "-"
+            ports.append([(f"SERIAL{n}", None), (connector, None), (uart, muted), (proto_text, None),
+                          (baud_text, None)])
+        sections.append(("Serial Ports", ["Serial", "Connector", "UART", "Protocol", "Baud"], ports, ""))
+
+        onboard = [[(item, None), (iface, muted), (status, color), (details, None)]
+                   for item, iface, status, color, details in self.onboard_rows()]
+        sections.append(("Onboard Hardware", ["Item", "Interface", "Status", "Details"], onboard, ""))
+
+        labels = {"idle": "NOT TESTED", "configuring": "RUNNING", "waiting": "RUNNING", "manual": "NOT CHECKED",
+                  "pass": "PASS", "fail": "FAIL", "na": "N/A (PASS)"}
+        colors = {"pass": C["ok"], "na": C["ok"], "fail": C["err"]}
+        tests = []
+        for spec in PORT_TESTS:
+            state = self.tests[spec["key"]]
+            widget = self.test_widgets[spec["key"]]["device"]
+            device = widget.currentText() if isinstance(widget, QComboBox) else widget.text()
+            tests.append([(spec["connector"], None), (spec["function"], muted), (device, None),
+                          (labels[state["state"]], colors.get(state["state"], C["warn"])), (state["detail"], None)])
+        passed, failed, total = self.test_result_counts()
+        sections.append(("Port Test Results", ["Connector", "Function", "Device", "Result", "Details"], tests,
+                         f"{passed} of {total} passed, {failed} failed."))
+
+        return sections
+
+    def report_sensor_rows(self):
+        """One row per sensor: IMUs as a whole (accel + gyro), compasses, barometers, battery and GPS."""
+        now = time.monotonic()
+        muted = C["muted"]
+        ardupilot = self.autopilot == mavlink.MAV_AUTOPILOT_ARDUPILOTMEGA
+        rows = []
+
+        def reading(key):
+            entry = self.live.get(key)
+            if not entry:
+                return "No data", C["err"]
+            return entry[1], C["err"] if now - entry[2] > STALE_S else None
+
+        def row(name, infos, value, color=None):
+            chip, bus, addr = (" / ".join(dict.fromkeys(i[field] for i in infos)) or "-"
+                               for field in ("chip", "bus", "address"))
+            rows.append([(name, None), (chip, None), (bus, None), (addr, None), (value, color)])
+
+        for inst in range(3):
+            infos = [decode_device_id(dev, kind, ardupilot)
+                     for kind, dev in ((k, self.device_id(k, inst)) for k in ("accel", "gyro")) if dev]
+            if infos:
+                row(f"IMU {inst + 1}", infos, *reading(("temp", inst)))
+        for inst in range(3):
+            dev = self.device_id("mag", inst)
+            if not dev:
+                continue
+            field = self.mag_field.get(inst)
+            if field is None:
+                value, color = reading(("mag", inst))
+            else:
+                value = f"{field:.0f} mGauss (EMI {MAG_FIELD_MIN}-{MAG_FIELD_MAX})"
+                color = C["ok"] if MAG_FIELD_MIN <= field <= MAG_FIELD_MAX else C["err"]
+            row(f"Compass {inst + 1}", [decode_device_id(dev, "mag", ardupilot)], value, color)
+        for inst in range(3):
+            dev = self.device_id("baro", inst)
+            if dev:
+                row(f"Barometer {inst + 1}", [decode_device_id(dev, "baro", ardupilot)], *reading(("baro", inst)))
+
+        batt = self.param_value("BATT_MONITOR")
+        batt = int(batt) if batt is not None else None
+        chip = "INA238" if batt == 21 else ("-" if batt is None else f"BATT_MONITOR {batt}")
+        pw = self.power if self.power and now - self.power["t"] <= STALE_S else None
+        for label, key, unit in (("Battery Voltage", "voltage", "V"), ("Battery Current", "current", "A")):
+            value = pw.get(key) if pw else None
+            text = f"{value:.2f} {unit}" if value is not None else ("Not measured" if pw else "No data")
+            color = None if value is not None else (muted if pw else C["err"])
+            rows.append([(label, None), (chip, None), ("I2C 1" if batt == 21 else "-", None), ("-", None),
+                         (text, color)])
+
+        ports = self.gps_ports()
+        for inst in range(2):
+            gtype = self.gps_type(inst)
+            info = self.gps_info.get(inst)
+            if not gtype and not info:
+                continue
+            chip = GPS_TYPES.get(gtype, f"Type {gtype}") if gtype is not None else "-"
+            if gtype == 9:
+                bus, port = "DroneCAN", "-"
+            else:
+                bus, port = "Serial", ports[inst] if inst < len(ports) else "-"
+            if info:
+                sats = f", {info['sats']} sats" if info["sats"] is not None else ""
+                fix_color = C["ok"] if info["fix_type"] >= 3 else C["warn"] if info["fix_type"] == 2 else C["err"]
+                value, color = f"{info['fix']}{sats}", C["err"] if now - info["t"] > STALE_S else fix_color
+            else:
+                value, color = "No data", C["err"]
+            rows.append([(f"GPS {inst + 1}", None), (chip, None), (bus, None), (port, None), (value, color)])
+        return rows
+
+    def report_html(self, operator, board_id, when):
+        # screen colours are for a dark theme; use darker ones on paper
+        paper = {C["ok"]: "#15803d", C["err"]: "#b91c1c", C["warn"]: "#b45309", C["accent"]: "#1d4ed8",
+                 C["muted"]: "#6b7280"}
+        esc = html.escape
+        passed, failed, total = self.test_result_counts()
+        if failed:
+            verdict, verdict_color = "FAIL", "#b91c1c"
+        elif passed == total:
+            verdict, verdict_color = "PASS", "#15803d"
+        else:
+            verdict, verdict_color = "INCOMPLETE", "#b45309"
+        firmware = self.version.get("firmware", self.version.get("fw_number", "-"))
+        uid = self.version.get("uid", "-")
+        out = [f"""<html><head><style>
+            body {{ font-family: 'Inter', 'Segoe UI', sans-serif; font-size: 9pt; color: #111827; }}
+            h1 {{ font-size: 18pt; margin: 0; }}
+            h2 {{ font-size: 12pt; margin-top: 16px; margin-bottom: 4px; color: #1d4ed8; }}
+            th {{ background: #e5e7eb; text-align: left; font-weight: bold; }}
+            td.k {{ color: #6b7280; }}
+            .note {{ color: #6b7280; }}
+            </style></head><body>
+            <h1>Board Test Report</h1>
+            <p class="note">{esc(BOARD_NAME)} &middot; generated by {esc(APP_NAME)}</p>
+            <table width="100%" cellspacing="0" cellpadding="5" border="1" style="border-collapse: collapse;">
+            <tr><td class="k" width="18%">Board ID</td><td width="32%"><b>{esc(board_id)}</b></td>
+                <td class="k" width="18%">Result</td>
+                <td width="32%"><b style="color: {verdict_color}">{verdict}</b> ({passed}/{total} passed)</td></tr>
+            <tr><td class="k">Tested by</td><td>{esc(operator)}</td>
+                <td class="k">Date</td><td>{when:%Y-%m-%d %H:%M:%S}</td></tr>
+            <tr><td class="k">Firmware</td><td>{esc(firmware)}</td><td class="k">UID</td><td>{esc(uid)}</td></tr>
+            </table>"""]
+        for number, (title, headers, rows, note) in enumerate(self.report_sections(), 1):
+            out.append(f"<h2>{number}. {esc(title)}</h2>")
+            if rows:
+                out.append('<table width="100%" cellspacing="0" cellpadding="4" border="1" '
+                           'style="border-collapse: collapse;"><tr>')
+                out.extend(f"<th>{esc(h)}</th>" for h in headers)
+                out.append("</tr>")
+                for row in rows:
+                    out.append("<tr>")
+                    for text, color in row:
+                        style = f' style="color: {paper.get(color, color)}"' if color else ""
+                        out.append(f"<td{style}>{esc(str(text))}</td>")
+                    out.append("</tr>")
+                out.append("</table>")
+            if note:
+                out.append(f'<p class="note">{esc(note)}</p>')
+        out.append("</body></html>")
+        return "".join(out)
+
+    def write_report_pdf(self, path, operator, board_id, when):
+        writer = QPdfWriter(path)
+        writer.setPageSize(QPageSize(QPageSize.A4))
+        writer.setPageMargins(QMarginsF(12, 12, 12, 12), QPageLayout.Millimeter)
+        writer.setTitle(f"Board Test Report {board_id}")
+        writer.setCreator(APP_NAME)
+        doc = QTextDocument()
+        doc.setHtml(self.report_html(operator, board_id, when))
+        doc.print_(writer)
+
     # ---- shutdown ---------------------------------------------------------------------------
 
     def shutdown(self):
@@ -3127,6 +3290,24 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
+def log_path():
+    return os.path.join(LOG_DIR, time.strftime("board_test_%Y%m%d.log"))
+
+
+def setup_file_log():
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        handler = logging.FileHandler(log_path(), encoding="utf-8")
+    except OSError as exc:
+        print(f"Log file disabled: {exc}", file=sys.stderr)
+        return
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(message)s"))
+    file_log.addHandler(handler)
+    file_log.setLevel(logging.INFO)
+    file_log.propagate = False
+    file_log.info("---- %s started ----", APP_NAME)
+
+
 def install_shutdown_handlers(app, window):
     def on_signal(*_):
         window.close()
@@ -3141,8 +3322,14 @@ def install_shutdown_handlers(app, window):
     app.aboutToQuit.connect(window.shutdown)
 
     def on_exception(exc_type, exc, tb):
-        traceback.print_exception(exc_type, exc, tb)
-        window.notify(f"Internal error: {exc_type.__name__}: {exc}", 0)
+        try:
+            first = window.log_exception(exc_type, exc, tb)
+        except Exception:
+            traceback.print_exc()
+            first = True
+        if first:
+            traceback.print_exception(exc_type, exc, tb)
+        window.notify(f"Internal error: {exc_type.__name__}: {exc} (see {log_path()})", 0)
 
     sys.excepthook = on_exception
 
@@ -3151,6 +3338,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(STYLE)
+    setup_file_log()
     window = MainWindow()
     install_shutdown_handlers(app, window)
     window.show()
