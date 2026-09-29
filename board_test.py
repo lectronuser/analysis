@@ -15,8 +15,10 @@ os.environ.setdefault("MAVLINK20", "1")
 
 import serial.tools.list_ports
 from pymavlink import mavutil
-from PySide6.QtCore import QMarginsF, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QPageLayout, QPageSize, QPdfWriter, QTextDocument
+from PySide6.QtCore import QMarginsF, QPointF, QRectF, QSizeF, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import (
+    QAbstractTextDocumentLayout, QColor, QFont, QImage, QPageLayout, QPageSize, QPainter, QPainterPath, QPdfWriter, QPen, QTextDocument,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame,
     QGridLayout,
@@ -43,6 +45,28 @@ PWM_MIN, PWM_MAX = 800, 2200
 READER_STOP_TIMEOUT_MS = 2000
 # Earth field strength limits used by ArduPilot's compass arming check (mGauss)
 MAG_FIELD_MIN, MAG_FIELD_MAX = 185, 875
+
+# STM32H753 memory, for the resource table of the report
+MCU_RAM_KB = 1024
+MCU_FLASH_KB = 2048
+LOW_MEMORY_KB = 32
+HIGH_LOAD_PCT = 80
+
+# ArduPilot AP_InternalError bits, sent in SYS_STATUS errors_count1 (low 16) / errors_count2 (high 16)
+INTERNAL_ERRORS = (
+    "logger_mapfailure", "logger_missing_logstructure", "logger_logwrite_missingfmt", "logger_too_many_deletions",
+    "logger_bad_getfilename", "panic", "logger_flushing_without_sem", "logger_bad_current_block",
+    "logger_blockcount_mismatch", "logger_dequeue_failure", "constraining_nan", "watchdog_reset", "iomcu_reset",
+    "iomcu_fail", "spi_fail", "main_loop_stuck", "gcs_bad_missionprotocol_link", "bitmask_range", "gcs_offset",
+    "i2c_isr", "flow_of_control", "switch_full_sector_recursion", "bad_rotation", "stack_overflow", "imu_reset",
+    "gpio_isr", "mem_guard", "dma_fail", "params_restored", "invalid_arg_or_result",
+)
+
+# IMU recording for the test report (board must be kept still)
+IMU_CAPTURE_S = 5.0
+IMU_CAPTURE_HZ = 50
+GRAVITY = 9.80665
+GRAVITY_TOLERANCE = 0.3    # |a| must be within this of 1 g (m/s2) for a still board
 
 # Auto reboot / reconnect after settings are applied
 PARAM_CONFIRM_S = 6.0      # wait for PARAM_VALUE echoes before rebooting
@@ -711,6 +735,153 @@ class NavButton(QPushButton):
             label.setStyleSheet(f"color: {color}; font-size: {label.property('font_px')}px; font-weight: {weight};")
 
 
+# Report (paper) colours
+R = {"navy": "#0f2d6b", "blue": "#1d4ed8", "light": "#eaf1fe", "panel": "#f8fafc", "grid": "#dfe5ee",
+     "line": "#cbd5e1", "text": "#0f172a", "muted": "#64748b", "ok": "#15803d", "ok_bg": "#dcfce7",
+     "err": "#b91c1c", "err_bg": "#fee2e2", "warn": "#b45309", "warn_bg": "#fef3c7", "idle": "#94a3b8"}
+IMU_COLORS = ("#2563eb", "#f97316", "#16a34a")
+REPORT_WIDTH = 700  # layout width of the report in px; scaled to the printable width of A4
+
+
+def nice_step(span, ticks=4):
+    raw = span / ticks
+    mag = 10 ** math.floor(math.log10(raw))
+    return next(m * mag for m in (1, 2, 2.5, 5, 10) if raw <= m * mag)
+
+
+def tick_text(value, step):
+    decimals = max(0, -math.floor(math.log10(step) + 1e-9))
+    if round(step / 10 ** math.floor(math.log10(step)), 1) == 2.5:
+        decimals += 1
+    return f"{value:.{decimals}f}"
+
+
+def chart_font(px, bold=False):
+    font = QFont("Inter")
+    font.setPixelSize(px)
+    font.setBold(bold)
+    return font
+
+
+def render_imu_chart(title, unit, series, min_span, width=700, scale=3):
+    """Three stacked panels (X, Y, Z); every IMU of `series` ({label: [(t, x, y, z)]}) is drawn on top."""
+    panel_h, top, bottom, left, right, gap = 88, 34, 24, 56, 10, 8
+    height = top + 3 * panel_h + 2 * gap + bottom
+    img = QImage(int(width * scale), int(height * scale), QImage.Format_ARGB32)
+    img.fill(QColor("white"))
+    p = QPainter(img)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.scale(scale, scale)
+    p.setFont(chart_font(13, True))
+    p.setPen(QColor(R["text"]))
+    p.drawText(QPointF(left, 18), f"{title}  [{unit}]")
+    # legend, right aligned
+    p.setFont(chart_font(11))
+    x = width - right
+    for i, label in reversed(list(enumerate(series))):
+        w = p.fontMetrics().horizontalAdvance(label)
+        x -= w
+        p.setPen(QColor(R["text"]))
+        p.drawText(QPointF(x, 18), label)
+        x -= 22
+        p.setPen(QPen(QColor(IMU_COLORS[i % len(IMU_COLORS)]), 2.5))
+        p.drawLine(QPointF(x, 14), QPointF(x + 16, 14))
+        x -= 14
+    starts = [pts[0][0] for pts in series.values() if pts]
+    t0 = min(starts) if starts else 0.0
+    plot_w = width - left - right
+    for axis, name in enumerate("XYZ"):
+        y0 = top + axis * (panel_h + gap)
+        rect = QRectF(left, y0, plot_w, panel_h)
+        p.fillRect(rect, QColor(R["panel"]))
+        values = [pt[axis + 1] for pts in series.values() for pt in pts]
+        lo, hi = (min(values), max(values)) if values else (-1.0, 1.0)
+        if hi - lo < min_span:
+            mid = (hi + lo) / 2
+            lo, hi = mid - min_span / 2, mid + min_span / 2
+        pad = (hi - lo) * 0.08
+        lo, hi = lo - pad, hi + pad
+        step = nice_step(hi - lo)
+
+        def ypos(v):
+            return y0 + panel_h - (v - lo) / (hi - lo) * panel_h
+
+        p.setFont(chart_font(10))
+        tick = math.ceil(lo / step) * step
+        while tick <= hi:
+            y = ypos(tick)
+            p.setPen(QPen(QColor(R["grid"]), 0.8))
+            p.drawLine(QPointF(left, y), QPointF(left + plot_w, y))
+            p.setPen(QColor(R["muted"]))
+            p.drawText(QRectF(0, y - 7, left - 6, 14), Qt.AlignRight | Qt.AlignVCenter, tick_text(tick, step))
+            tick += step
+        for sec in range(int(IMU_CAPTURE_S) + 1):
+            xs = left + sec / IMU_CAPTURE_S * plot_w
+            p.setPen(QPen(QColor(R["grid"]), 0.8))
+            p.drawLine(QPointF(xs, y0), QPointF(xs, y0 + panel_h))
+            if axis == 2:
+                p.setPen(QColor(R["muted"]))
+                p.drawText(QRectF(xs - 20, y0 + panel_h + 4, 40, 14), Qt.AlignCenter, f"{sec} s")
+        p.save()
+        p.setClipRect(rect)
+        for i, pts in enumerate(series.values()):
+            path = QPainterPath()
+            for j, pt in enumerate(pts):
+                point = QPointF(left + (pt[0] - t0) / IMU_CAPTURE_S * plot_w, ypos(pt[axis + 1]))
+                path.lineTo(point) if j else path.moveTo(point)
+            p.setPen(QPen(QColor(IMU_COLORS[i % len(IMU_COLORS)]), 1.3))
+            p.drawPath(path)
+        p.restore()
+        p.setPen(QPen(QColor(R["line"]), 1))
+        p.drawRect(rect)
+        badge = QRectF(left + 6, y0 + 6, 20, 16)
+        p.fillRect(badge, QColor(R["navy"]))
+        p.setPen(QColor("white"))
+        p.setFont(chart_font(10, True))
+        p.drawText(badge, Qt.AlignCenter, name)
+    p.end()
+    return img
+
+
+def render_donut(parts, center, caption, size=150, scale=3):
+    """Ring chart of (value, colour) parts with a big number in the middle."""
+    img = QImage(size * scale, size * scale, QImage.Format_ARGB32)
+    img.fill(QColor("white"))
+    p = QPainter(img)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.scale(scale, scale)
+    ring = 18
+    rect = QRectF(ring / 2 + 4, ring / 2 + 4, size - ring - 8, size - ring - 8)
+    total = sum(v for v, _ in parts)
+    p.setPen(QPen(QColor(R["grid"]), ring, Qt.SolidLine, Qt.FlatCap))
+    p.drawEllipse(rect)
+    start = 90 * 16
+    for value, color in parts:
+        if value and total:
+            span = -round(value / total * 360 * 16)
+            p.setPen(QPen(QColor(color), ring, Qt.SolidLine, Qt.FlatCap))
+            p.drawArc(rect, start, span)
+            start += span
+    p.setPen(QColor(R["text"]))
+    p.setFont(chart_font(24, True))
+    p.drawText(QRectF(0, size / 2 - 24, size, 30), Qt.AlignCenter, center)
+    p.setPen(QColor(R["muted"]))
+    p.setFont(chart_font(10))
+    p.drawText(QRectF(0, size / 2 + 6, size, 16), Qt.AlignCenter, caption)
+    p.end()
+    return img
+
+
+def series_stats(pts):
+    """Per axis mean and standard deviation plus the sample rate of [(t, x, y, z)]."""
+    n = len(pts)
+    means = [sum(pt[a] for pt in pts) / n for a in (1, 2, 3)]
+    stds = [math.sqrt(sum((pt[a] - m) ** 2 for pt in pts) / n) for a, m in zip((1, 2, 3), means)]
+    duration = pts[-1][0] - pts[0][0]
+    rate = (n - 1) / duration if duration > 0 else 0.0
+    return means, stds, rate
+
+
 class ReportDialog(QDialog):
     """Asks who ran the test and which board it was before the PDF report is written."""
 
@@ -724,7 +895,8 @@ class ReportDialog(QDialog):
         title = QLabel("Test Report")
         title.setObjectName("bigText")
         lay.addWidget(title)
-        lay.addWidget(muted_label("The date and time are added automatically.", wrap=True))
+        lay.addWidget(muted_label(f"The date and time are added automatically. {IMU_CAPTURE_S:.0f} seconds of IMU "
+                                  "data are recorded for the report: keep the board still.", wrap=True))
         self.name = QLineEdit(name)
         self.name.setPlaceholderText("Name Surname")
         self.board_id = QLineEdit(board_id)
@@ -778,7 +950,10 @@ class MainWindow(QMainWindow):
         self.port_backup = {}    # parameter values changed by port tests, for "Restore ports"
         self.cmd_labels = {}     # MAV_CMD -> label that shows its COMMAND_ACK
         self.status_log = []
+        self.board_errors = {}   # (severity, text) -> [first time, last time, count]; kept across reconnects
         self.exception_counts = {}
+        self.imu_capture = None  # {"active", "accel": {inst: [(t, x, y, z)]}, "gyro": ..., "temp": {inst: C}}
+        self.report_request = None
         self.status_seq = 0
         self.reset_state()
 
@@ -1650,6 +1825,9 @@ class MainWindow(QMainWindow):
         self.power_status = None
         self.mcu = None
         self.hwstatus = None
+        self.meminfo = None      # {"free": bytes, "min_free": bytes, "t"}
+        self.sys_errors = None   # {"internal": bitmask, "count", "comm", "t"}
+        self.load_peak = 0.0
         self.iomcu_msg = None
         self.rc = None
         self.servo = None
@@ -1694,6 +1872,7 @@ class MainWindow(QMainWindow):
 
     def clear_status_log(self):
         self.status_log = []
+        self.board_errors = {}
         self.status_seq += 1
         self.refresh_status_log()
 
@@ -2168,13 +2347,19 @@ class MainWindow(QMainWindow):
         if "IOMCU" in text.upper():
             self.iomcu_msg = (m.severity, text)
         self.add_log(m.severity, text)
+        if m.severity <= mavlink.MAV_SEVERITY_WARNING:
+            now = time.strftime("%H:%M:%S")
+            entry = self.board_errors.setdefault((m.severity, text), [now, now, 0])
+            entry[1] = now
+            entry[2] += 1
         self.notify(f"[{enum_name('MAV_SEVERITY', m.severity, 'MAV_SEVERITY_')}] {text}")
 
     def on_COMMAND_ACK(self, m):
         name = enum_name("MAV_CMD", m.command, "MAV_CMD_")
         result = enum_name("MAV_RESULT", m.result, "MAV_RESULT_")
         good = m.result in (mavlink.MAV_RESULT_ACCEPTED, mavlink.MAV_RESULT_IN_PROGRESS)
-        if m.command not in (mavlink.MAV_CMD_REQUEST_MESSAGE, mavlink.MAV_CMD_DO_SEND_BANNER):
+        if m.command not in (mavlink.MAV_CMD_REQUEST_MESSAGE, mavlink.MAV_CMD_DO_SEND_BANNER,
+                             mavlink.MAV_CMD_SET_MESSAGE_INTERVAL):
             self.add_log(mavlink.MAV_SEVERITY_INFO if good else mavlink.MAV_SEVERITY_WARNING, f"{name}: {result}")
         label = self.cmd_labels.pop(m.command, None)
         if label is not None:
@@ -2211,6 +2396,14 @@ class MainWindow(QMainWindow):
             "drop": m.drop_rate_comm / 100,
             "t": time.monotonic(),
         }
+        self.load_peak = max(self.load_peak, m.load / 10)
+        self.sys_errors = {"internal": m.errors_count1 | (m.errors_count2 << 16), "count": m.errors_count4,
+                           "comm": m.errors_comm, "t": time.monotonic()}
+
+    def on_MEMINFO(self, m):
+        free = getattr(m, "freemem32", 0) or m.freemem
+        low = min(free, self.meminfo["min_free"]) if self.meminfo else free
+        self.meminfo = {"free": free, "min_free": low, "t": time.monotonic()}
 
     def on_POWER_STATUS(self, m):
         self.power_status = {"vcc": m.Vcc / 1000, "vservo": m.Vservo / 1000, "flags": m.flags,
@@ -2231,7 +2424,22 @@ class MainWindow(QMainWindow):
         if to_mgauss is not None:
             self.mag_field[inst] = math.sqrt(x * x + y * y + z * z) * to_mgauss
 
+    def capture_imu(self, inst, m, acc, gyro, temp=None):
+        """Store one sample (m/s2, deg/s) while the report recording runs."""
+        cap = self.imu_capture
+        if not cap or not cap["active"]:
+            return
+        t = (getattr(m, "time_usec", 0) / 1e6 or getattr(m, "time_boot_ms", 0) / 1000) or time.monotonic()
+        cap["accel"].setdefault(inst, []).append((t, *acc))
+        cap["gyro"].setdefault(inst, []).append((t, *gyro))
+        if temp is not None:
+            cap["temp"][inst] = temp
+
     def imu(self, inst, msg, m, unit_acc, unit_gyro, unit_mag):
+        if unit_acc == "mG":
+            self.capture_imu(inst, m, [v * GRAVITY / 1000 for v in (m.xacc, m.yacc, m.zacc)],
+                             [math.degrees(v / 1000) for v in (m.xgyro, m.ygyro, m.zgyro)],
+                             getattr(m, "temperature", 0) / 100 or None)
         self.set_live("accel", inst, msg, xyz(m.xacc, m.yacc, m.zacc, unit_acc))
         self.set_live("gyro", inst, msg, xyz(m.xgyro, m.ygyro, m.zgyro, unit_gyro))
         if (m.xmag, m.ymag, m.zmag) != (0, 0, 0):
@@ -2258,6 +2466,8 @@ class MainWindow(QMainWindow):
 
     def on_HIGHRES_IMU(self, m):
         inst = getattr(m, "id", 0)
+        self.capture_imu(inst, m, (m.xacc, m.yacc, m.zacc), [math.degrees(v) for v in (m.xgyro, m.ygyro, m.zgyro)],
+                         m.temperature)
         self.set_live("accel", inst, "HIGHRES_IMU", xyz(m.xacc, m.yacc, m.zacc, "m/s2", "{:.2f}"))
         self.set_live("gyro", inst, "HIGHRES_IMU", xyz(m.xgyro, m.ygyro, m.zgyro, "rad/s", "{:.3f}"))
         self.set_mag(inst, "HIGHRES_IMU", m.xmag, m.ymag, m.zmag, "Gauss", 1000.0, "{:.3f}")
@@ -3051,9 +3261,9 @@ class MainWindow(QMainWindow):
     def build_report_card(self, lay):
         card = Card("Test Report", "PDF")
         card.body.addWidget(muted_label(
-            "Creates a PDF with the board information, detected sensors and serial ports, the onboard hardware "
-            "table, the port test results and the live data. The date is added automatically; you enter your "
-            "name and the board ID.", wrap=True))
+            "Creates a PDF with the board information, detected sensors, IMU charts "
+            f"({IMU_CAPTURE_S:.0f} s recording, all IMUs overlaid), serial ports, the onboard hardware table and the "
+            "port test results. The date is added automatically; you enter your name and the board ID.", wrap=True))
         row = QHBoxLayout()
         self.report_status = muted_label(wrap=True)
         self.report_btn = QPushButton("Create Report")
@@ -3085,13 +3295,78 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
         self.report_dir = os.path.dirname(path)
+        self.report_request = (path, operator, board_id, now)
+        self.imu_capture = {"active": bool(self.target), "accel": {}, "gyro": {}, "temp": {}}
+        if not self.target:
+            self.finish_report()
+            return
+        self.report_btn.setEnabled(False)
+        for msg_id in (mavlink.MAVLINK_MSG_ID_MEMINFO, mavlink.MAVLINK_MSG_ID_MCU_STATUS):
+            self.send_command(mavlink.MAV_CMD_REQUEST_MESSAGE, msg_id)
+        self.set_imu_rate(IMU_CAPTURE_HZ)
+        set_label(self.report_status, f"Recording {IMU_CAPTURE_S:.0f} s of IMU data, keep the board still…",
+                  C["warn"])
+        QTimer.singleShot(int(IMU_CAPTURE_S * 1000) + 300, self.finish_report)
+
+    def imu_messages(self):
+        if self.autopilot == mavlink.MAV_AUTOPILOT_ARDUPILOTMEGA:
+            return (mavlink.MAVLINK_MSG_ID_RAW_IMU, mavlink.MAVLINK_MSG_ID_SCALED_IMU2,
+                    mavlink.MAVLINK_MSG_ID_SCALED_IMU3)
+        return (mavlink.MAVLINK_MSG_ID_HIGHRES_IMU,)
+
+    def set_imu_rate(self, hz):
+        """hz = 0 gives the messages back their default rate."""
+        for msg_id in self.imu_messages():
+            self.send_command(mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, msg_id, 1e6 / hz if hz else 0)
+
+    def finish_report(self):
+        if not self.report_request:
+            return
+        path, operator, board_id, when = self.report_request
+        self.report_request = None
+        if self.imu_capture["active"]:
+            self.imu_capture["active"] = False
+            self.set_imu_rate(0)
+        self.report_btn.setEnabled(True)
         try:
-            self.write_report_pdf(path, operator, board_id, now)
+            self.write_report_pdf(path, operator, board_id, when)
         except Exception as e:
             set_label(self.report_status, f"Could not write the report: {e}", C["err"])
+            self.add_log(mavlink.MAV_SEVERITY_ERROR, f"Test report failed: {e}", persist=True)
             return
         set_label(self.report_status, f"Saved {path}", C["ok"])
-        self.add_log(mavlink.MAV_SEVERITY_INFO, f"Test report saved: {path}")
+        self.add_log(mavlink.MAV_SEVERITY_INFO, f"Test report saved: {path}", persist=True)
+
+    def imu_report(self):
+        """Charts and statistics of the recorded IMU data: (images {name: QImage}, stats rows)."""
+        cap = self.imu_capture or {"accel": {}, "gyro": {}, "temp": {}}
+        ardupilot = self.autopilot == mavlink.MAV_AUTOPILOT_ARDUPILOTMEGA
+        insts = sorted(i for i, pts in cap["accel"].items() if len(pts) > 1)
+        if not insts:
+            return {}, []
+        labels = {i: f"IMU {i + 1}" for i in insts}
+        images = {
+            "accel": render_imu_chart("Accelerometer", "m/s\u00b2",
+                                      {labels[i]: cap["accel"][i] for i in insts}, 0.3),
+            "gyro": render_imu_chart("Gyroscope", "\u00b0/s", {labels[i]: cap["gyro"][i] for i in insts}, 1.0),
+        }
+        rows = []
+        for i in insts:
+            dev = self.device_id("accel", i)
+            chip = decode_device_id(dev, "accel", ardupilot)["chip"] if dev else "-"
+            a_mean, a_std, rate = series_stats(cap["accel"][i])
+            g_mean, g_std, _ = series_stats(cap["gyro"][i])
+            gmag = math.sqrt(sum(v * v for v in a_mean))
+            ok = abs(gmag - GRAVITY) <= GRAVITY_TOLERANCE
+            temp = cap["temp"].get(i)
+            rows.append([(labels[i], IMU_COLORS[insts.index(i) % len(IMU_COLORS)]), (chip, None),
+                         (f"{len(cap['accel'][i])} @ {rate:.0f} Hz", None),
+                         (f"{gmag:.2f}", C["ok"] if ok else C["err"]),
+                         (" / ".join(f"{v:.3f}" for v in a_std), None),
+                         (" / ".join(f"{v:.2f}" for v in g_mean), None),
+                         (" / ".join(f"{v:.3f}" for v in g_std), None),
+                         (f"{temp:.1f} \u00b0C" if temp is not None else "-", None)])
+        return images, rows
 
     def test_result_counts(self):
         states = [self.tests[t["key"]]["state"] for t in PORT_TESTS]
@@ -3107,6 +3382,8 @@ class MainWindow(QMainWindow):
         board = [[(key, muted), (label.text(), None)] for key, label in self.board_card.values.items()]
         board.append([("Connection", muted), (f"{self.port_device or '-'} @ {self.port_baud or '-'}", None)])
         sections.append(("Board Information", ["Item", "Value"], board, ""))
+        sections.append(("System Resources", ["Resource", "Value", "Status", "Source"], self.resource_rows(),
+                         "STM32H753 flight controller"))
 
         sections.append(("Detected Sensors", ["Sensor", "Chip", "Bus", "Address / Port", "Reading"],
                          self.report_sensor_rows(), ""))
@@ -3139,7 +3416,102 @@ class MainWindow(QMainWindow):
         sections.append(("Port Test Results", ["Connector", "Function", "Device", "Result", "Details"], tests,
                          f"{passed} of {total} passed, {failed} failed."))
 
+        errors = self.system_error_rows()
+        sections.append(("System Errors", ["Time", "Source", "Severity", "Message"], errors,
+                         f"{len(errors)} issue(s)" if errors else ""))
         return sections
+
+    def resource_rows(self):
+        """CPU, memory and health counters of the STM32 for the report: [(text, colour)] cells."""
+        now = time.monotonic()
+        muted = C["muted"]
+
+        def recent(data):
+            return data if data and now - data["t"] <= STALE_S * 3 else None
+
+        def row(name, value, status, color, source):
+            return [(name, None), (value, None), (status, color), (source, muted)]
+
+        rows = []
+        pw = recent(self.power)
+        if pw:
+            high = pw["load"] > HIGH_LOAD_PCT
+            rows.append(row("CPU load (main loop)", f"{pw['load']:.1f} %   (peak {self.load_peak:.1f} %)",
+                            "High" if high else "OK", C["warn"] if high else C["ok"], "SYS_STATUS"))
+        else:
+            rows.append(row("CPU load (main loop)", "-", "No data", C["err"], "SYS_STATUS"))
+
+        mem = recent(self.meminfo)
+        if mem:
+            free_kb, low_kb = mem["free"] / 1024, mem["min_free"] / 1024
+            used = 100 * (1 - free_kb / MCU_RAM_KB)
+            bad = low_kb < LOW_MEMORY_KB
+            rows.append(row("RAM free (heap)", f"{free_kb:.1f} KB   (lowest {low_kb:.1f} KB)",
+                            "Low" if bad else "OK", C["err"] if bad else C["ok"], "MEMINFO"))
+            rows.append(row("RAM used (approx.)", f"{MCU_RAM_KB - free_kb:.0f} KB of {MCU_RAM_KB} KB   ({used:.0f} %)",
+                            "Info", None, "SRAM - free heap"))
+        else:
+            rows.append(row("RAM free (heap)", "-", "No data", C["err"], "MEMINFO"))
+        rows.append(row("Flash", f"{MCU_FLASH_KB} KB", "Info", None, "hwdef (firmware size not sent)"))
+
+        mcu = recent(self.mcu)
+        if mcu:
+            hot = mcu["temp"] > 85
+            rows.append(row("MCU temperature", f"{mcu['temp']:.1f} \u00b0C", "High" if hot else "OK",
+                            C["warn"] if hot else C["ok"], "MCU_STATUS"))
+            ok = 3.1 <= mcu["v"] <= 3.5
+            rows.append(row("MCU voltage", f"{mcu['v']:.2f} V   (min {mcu['vmin']:.2f}, max {mcu['vmax']:.2f})",
+                            "OK" if ok else "Out of range", C["ok"] if ok else C["err"], "MCU_STATUS"))
+        else:
+            rows.append(row("MCU temperature / voltage", "-", "No data", muted, "MCU_STATUS"))
+
+        ps = recent(self.power_status)
+        if ps:
+            ok = 4.5 <= ps["vcc"] <= 5.5
+            rows.append(row("Board 5V (Vcc)", f"{ps['vcc']:.2f} V", "OK" if ok else "Out of range",
+                            C["ok"] if ok else C["err"], "POWER_STATUS"))
+
+        hw = recent(self.hwstatus)
+        if hw:
+            rows.append(row("I2C errors", str(hw["i2cerr"]), "OK" if not hw["i2cerr"] else "Errors",
+                            C["ok"] if not hw["i2cerr"] else C["warn"], "HWSTATUS"))
+
+        errs = recent(self.sys_errors)
+        if errs:
+            bits = errs["internal"]
+            rows.append(row("Internal errors", f"0x{bits:08X}   ({errs['count']} occurrences)",
+                            "Errors" if bits else "None", C["err"] if bits else C["ok"], "SYS_STATUS"))
+        if pw:
+            bad = pw["drop"] > 5
+            rows.append(row("Link loss", f"{pw['drop']:.1f} %", "High" if bad else "OK",
+                            C["warn"] if bad else C["ok"], "SYS_STATUS"))
+        return rows
+
+    def system_error_rows(self):
+        """Internal errors, unhealthy sensors and the board's warning / error messages."""
+        rows = []
+        err = C["err"]
+        errs = self.sys_errors
+        if errs and errs["internal"]:
+            for bit in range(32):
+                if errs["internal"] & (1 << bit):
+                    name = INTERNAL_ERRORS[bit] if bit < len(INTERNAL_ERRORS) else "unknown"
+                    rows.append([("-", None), ("Internal error", None), ("Error", err),
+                                 (f"{name} (bit {bit}, 0x{1 << bit:X})", None)])
+        if self.sys_status:
+            present, enabled, healthy = self.sys_status
+            bad = present & enabled & ~healthy
+            for bit in range(32):
+                if bad & (1 << bit):
+                    name = enum_name("MAV_SYS_STATUS_SENSOR", 1 << bit, "MAV_SYS_STATUS_SENSOR_")
+                    rows.append([("-", None), ("Sensor health", None), ("Error", err), (f"{name} not healthy", None)])
+        for (severity, text), (first, last, count) in sorted(self.board_errors.items(), key=lambda e: e[1][0]):
+            name = enum_name("MAV_SEVERITY", severity, "MAV_SEVERITY_")
+            when = first if first == last else f"{first} - {last}"
+            message = text if count == 1 else f"{text}   (\u00d7{count})"
+            rows.append([(when, None), ("Board message", None),
+                         (name, err if severity <= mavlink.MAV_SEVERITY_ERROR else C["warn"]), (message, None)])
+        return rows
 
     def report_sensor_rows(self):
         """One row per sensor: IMUs as a whole (accel + gyro), compasses, barometers, battery and GPS."""
@@ -3211,54 +3583,127 @@ class MainWindow(QMainWindow):
             rows.append([(f"GPS {inst + 1}", None), (chip, None), (bus, None), (port, None), (value, color)])
         return rows
 
-    def report_html(self, operator, board_id, when):
-        # screen colours are for a dark theme; use darker ones on paper
-        paper = {C["ok"]: "#15803d", C["err"]: "#b91c1c", C["warn"]: "#b45309", C["accent"]: "#1d4ed8",
-                 C["muted"]: "#6b7280"}
+    def report_html(self, operator, board_id, when, imu_rows):
         esc = html.escape
+        paper = {C["ok"]: (R["ok"], R["ok_bg"]), C["err"]: (R["err"], R["err_bg"]), C["warn"]: (R["warn"], R["warn_bg"])}
         passed, failed, total = self.test_result_counts()
         if failed:
-            verdict, verdict_color = "FAIL", "#b91c1c"
+            verdict, v_color = "FAIL", C["err"]
         elif passed == total:
-            verdict, verdict_color = "PASS", "#15803d"
+            verdict, v_color = "PASS", C["ok"]
         else:
-            verdict, verdict_color = "INCOMPLETE", "#b45309"
+            verdict, v_color = "INCOMPLETE", C["warn"]
         firmware = self.version.get("firmware", self.version.get("fw_number", "-"))
         uid = self.version.get("uid", "-")
-        out = [f"""<html><head><style>
-            body {{ font-family: 'Inter', 'Segoe UI', sans-serif; font-size: 9pt; color: #111827; }}
-            h1 {{ font-size: 18pt; margin: 0; }}
-            h2 {{ font-size: 12pt; margin-top: 16px; margin-bottom: 4px; color: #1d4ed8; }}
-            th {{ background: #e5e7eb; text-align: left; font-weight: bold; }}
-            td.k {{ color: #6b7280; }}
-            .note {{ color: #6b7280; }}
-            </style></head><body>
-            <h1>Board Test Report</h1>
-            <p class="note">{esc(BOARD_NAME)} &middot; generated by {esc(APP_NAME)}</p>
-            <table width="100%" cellspacing="0" cellpadding="5" border="1" style="border-collapse: collapse;">
-            <tr><td class="k" width="18%">Board ID</td><td width="32%"><b>{esc(board_id)}</b></td>
-                <td class="k" width="18%">Result</td>
-                <td width="32%"><b style="color: {verdict_color}">{verdict}</b> ({passed}/{total} passed)</td></tr>
-            <tr><td class="k">Tested by</td><td>{esc(operator)}</td>
-                <td class="k">Date</td><td>{when:%Y-%m-%d %H:%M:%S}</td></tr>
-            <tr><td class="k">Firmware</td><td>{esc(firmware)}</td><td class="k">UID</td><td>{esc(uid)}</td></tr>
-            </table>"""]
-        for number, (title, headers, rows, note) in enumerate(self.report_sections(), 1):
-            out.append(f"<h2>{number}. {esc(title)}</h2>")
-            if rows:
-                out.append('<table width="100%" cellspacing="0" cellpadding="4" border="1" '
-                           'style="border-collapse: collapse;"><tr>')
-                out.extend(f"<th>{esc(h)}</th>" for h in headers)
+        sections = self.report_sections()
+        sensors = next(rows for title, _, rows, _ in sections if title == "Detected Sensors")
+        n_sensors = sum(1 for r in sensors if not r[0][0].startswith(("Battery", "GPS")))
+        n_imus = sum(1 for r in sensors if r[0][0].startswith("IMU"))
+
+        def cell(text, color=None, extra=""):
+            if color in paper:
+                fg, bg = paper[color]
+                return f'<td bgcolor="{bg}"{extra}><b style="color:{fg}">{esc(str(text))}</b></td>'
+            if color:
+                return f'<td{extra} style="color:{paper.get(color, (color,))[0]}">{esc(str(text))}</td>'
+            return f"<td{extra}>{esc(str(text))}</td>"
+
+        def heading(number, title, subtitle=""):
+            sub = f'&nbsp;&nbsp;<span style="color:{R["muted"]}; font-size:11px">{esc(subtitle)}</span>' if subtitle else ""
+            return (f'<table width="100%" cellspacing="0" cellpadding="0" style="margin-top:14px; margin-bottom:6px">'
+                    f'<tr><td width="5" bgcolor="{R["blue"]}"></td>'
+                    f'<td bgcolor="{R["light"]}" style="padding:5px 8px"><span style="font-size:15px; color:{R["navy"]}">'
+                    f'<b>{number:02d}&nbsp;&nbsp;{esc(title)}</b></span>{sub}</td></tr></table>')
+
+        def table(headers, rows, widths=None):
+            out = ['<table width="100%" cellspacing="0" cellpadding="4" border="1" '
+                   f'style="border-collapse:collapse; border-color:{R["line"]}"><thead><tr>']
+            for i, h in enumerate(headers):
+                w = f' width="{widths[i]}"' if widths else ""
+                out.append(f'<td bgcolor="{R["navy"]}"{w}><b style="color:white">{esc(h)}</b></td>')
+            out.append("</tr></thead>")
+            for n, row in enumerate(rows):
+                bg = f' bgcolor="{R["panel"]}"' if n % 2 else ""
+                out.append(f"<tr{bg}>")
+                for text, color in row:
+                    if color and color.startswith("#") and color not in paper and color not in (C["muted"],):
+                        # IMU colour key
+                        out.append(f'<td><b style="color:{color}">&#9632;</b> {esc(str(text))}</td>')
+                    else:
+                        out.append(cell(text, color if color != C["muted"] else R["muted"]))
                 out.append("</tr>")
-                for row in rows:
-                    out.append("<tr>")
-                    for text, color in row:
-                        style = f' style="color: {paper.get(color, color)}"' if color else ""
-                        out.append(f"<td{style}>{esc(str(text))}</td>")
-                    out.append("</tr>")
-                out.append("</table>")
-            if note:
-                out.append(f'<p class="note">{esc(note)}</p>')
+            out.append("</table>")
+            return "".join(out)
+
+        def tile(value, label, color=R["navy"]):
+            return (f'<td bgcolor="{R["light"]}" width="25%" style="padding:8px">'
+                    f'<span style="font-size:23px; color:{color}"><b>{esc(value)}</b></span><br>'
+                    f'<span style="color:{R["muted"]}; font-size:11px">{esc(label)}</span></td>')
+
+        v_fg = paper[v_color][0]
+        # no <style> for body: in Qt it would override the font size of every span
+        out = [f"""<html><body style="color:{R['text']}">
+            <table width="100%" cellspacing="0" cellpadding="12" bgcolor="{R['navy']}"><tr>
+              <td><span style="color:#93b4f5; font-size:11px"><b>TECHNICAL TEST REPORT</b></span><br>
+                  <span style="color:white; font-size:27px"><b>Board Test Report</b></span><br>
+                  <span style="color:#c7d7fb">{esc(BOARD_NAME)} &middot; production / bring-up test</span></td>
+              <td align="right"><span style="color:#93b4f5; font-size:11px">BOARD ID</span><br>
+                  <span style="color:white; font-size:19px"><b>{esc(board_id)}</b></span><br>
+                  <span style="color:#c7d7fb">{when:%Y-%m-%d %H:%M}</span></td></tr></table>
+            <table width="100%" cellspacing="0" cellpadding="5" bgcolor="{R['light']}"><tr>
+              <td><span style="color:{R['muted']}">Tested by</span>&nbsp; <b>{esc(operator)}</b></td>
+              <td><span style="color:{R['muted']}">Date</span>&nbsp; <b>{when:%Y-%m-%d %H:%M:%S}</b></td>
+              <td><span style="color:{R['muted']}">Firmware</span>&nbsp; <b>{esc(firmware)}</b></td></tr>
+              <tr><td colspan="3"><span style="color:{R['muted']}">UID</span>&nbsp; {esc(uid)}</td></tr></table>
+            <br>
+            <table width="100%" cellspacing="6" cellpadding="0"><tr>
+              <td width="160" align="center"><img src="chart:donut" width="140" height="140"></td>
+              <td><table width="100%" cellspacing="6" cellpadding="0"><tr>
+                {tile(verdict, "Overall result", v_fg)}{tile(f"{passed}/{total}", "Port tests passed")}
+                {tile(str(failed), "Port tests failed", R["err"] if failed else R["navy"])}
+                {tile(str(n_sensors), f"Sensors detected ({n_imus} IMU)")}</tr></table>
+                <p style="color:{R['muted']}">
+                <b style="color:{R['ok']}">&#9632;</b> Pass &nbsp;&nbsp;<b style="color:{R['err']}">&#9632;</b> Fail
+                &nbsp;&nbsp;<b style="color:{R['idle']}">&#9632;</b> Not tested / not checked</p></td></tr></table>"""]
+        number = 0
+        for title, headers, rows, note in sections:
+            number += 1
+            if title == "Board Information":
+                out.append(heading(number, title))
+                pairs = [(r[0][0], r[1][0]) for r in rows]
+                grid = ['<table width="100%" cellspacing="0" cellpadding="4" border="1" '
+                        f'style="border-collapse:collapse; border-color:{R["line"]}">']
+                for i in range(0, len(pairs), 2):
+                    grid.append("<tr>")
+                    for key, value in pairs[i:i + 2]:
+                        grid.append(f'<td width="17%" bgcolor="{R["panel"]}" style="color:{R["muted"]}">{esc(key)}</td>'
+                                    f'<td width="33%">{esc(str(value))}</td>')
+                    grid.append("</tr>")
+                grid.append("</table>")
+                out.append("".join(grid))
+            else:
+                out.append(heading(number, title, note))
+                if rows:
+                    out.append(table(headers, rows))
+                elif title == "System Errors":
+                    out.append(f'<p style="color:{R["ok"]}"><b>No errors reported by the board.</b></p>')
+                else:
+                    out.append(f'<p style="color:{R["muted"]}">No data.</p>')
+            if title == "Detected Sensors":
+                number += 1
+                out.append('<p style="page-break-before: always"></p>')
+                out.append(heading(number, "IMU Data", f"{IMU_CAPTURE_S:.0f} s recording, all IMUs on one chart"))
+                if imu_rows:
+                    out.append('<p><img src="chart:accel" width="690"></p><p><img src="chart:gyro" width="690"></p>')
+                    out.append(table(["IMU", "Chip", "Samples", "|a| m/s\u00b2", "Accel noise X/Y/Z",
+                                      "Gyro bias X/Y/Z \u00b0/s", "Gyro noise X/Y/Z", "Temp"], imu_rows))
+                    out.append(f'<p style="color:{R["muted"]}">The board is still during the recording, so |a| '
+                               f'must be close to {GRAVITY:.2f} m/s\u00b2 (\u00b1{GRAVITY_TOLERANCE}) and the gyro '
+                               'close to 0 \u00b0/s. Noise is the standard deviation of each axis. Curves of '
+                               'different IMUs should lie on top of each other.</p>')
+                else:
+                    out.append(f'<p style="color:{R["muted"]}">No IMU data was recorded (board not connected).</p>')
+                out.append('<p style="page-break-before: always"></p>')
         out.append("</body></html>")
         return "".join(out)
 
@@ -3268,9 +3713,49 @@ class MainWindow(QMainWindow):
         writer.setPageMargins(QMarginsF(12, 12, 12, 12), QPageLayout.Millimeter)
         writer.setTitle(f"Board Test Report {board_id}")
         writer.setCreator(APP_NAME)
+        images, imu_rows = self.imu_report()
+        passed, failed, total = self.test_result_counts()
+        images["donut"] = render_donut([(passed, R["ok"]), (failed, R["err"]), (total - passed - failed, R["idle"])],
+                                       f"{passed}/{total}", "tests passed")
         doc = QTextDocument()
-        doc.setHtml(self.report_html(operator, board_id, when))
-        doc.print_(writer)
+        doc.setDocumentMargin(0)
+        doc.setDefaultFont(chart_font(11))
+        for name, image in images.items():
+            doc.addResource(QTextDocument.ImageResource, QUrl(f"chart:{name}"), image)
+        doc.setHtml(self.report_html(operator, board_id, when, imu_rows))
+
+        # Lay the document out REPORT_WIDTH px wide and scale it to the printable area, leaving room for a footer
+        area = writer.pageLayout().paintRectPixels(writer.resolution())
+        scale = area.width() / REPORT_WIDTH
+        footer_h = 22
+        page_h = area.height() / scale - footer_h
+        doc.setPageSize(QSizeF(REPORT_WIDTH, page_h))
+        pages = doc.pageCount()
+        painter = QPainter(writer)
+        try:
+            for page in range(pages):
+                if page:
+                    writer.newPage()
+                painter.save()
+                painter.scale(scale, scale)
+                painter.save()
+                painter.translate(0, -page * page_h)
+                ctx = QAbstractTextDocumentLayout.PaintContext()
+                ctx.clip = QRectF(0, page * page_h, REPORT_WIDTH, page_h)
+                painter.setClipRect(ctx.clip)
+                doc.documentLayout().draw(painter, ctx)
+                painter.restore()
+                painter.setPen(QPen(QColor(R["line"]), 0.8))
+                painter.drawLine(QPointF(0, page_h + 6), QPointF(REPORT_WIDTH, page_h + 6))
+                painter.setPen(QColor(R["muted"]))
+                painter.setFont(chart_font(9))
+                line = QRectF(0, page_h + 8, REPORT_WIDTH, footer_h - 8)
+                painter.drawText(line, Qt.AlignLeft | Qt.AlignVCenter,
+                                 f"{APP_NAME} \u00b7 {BOARD_NAME} \u00b7 {board_id} \u00b7 {when:%Y-%m-%d %H:%M}")
+                painter.drawText(line, Qt.AlignRight | Qt.AlignVCenter, f"Page {page + 1} / {pages}")
+                painter.restore()
+        finally:
+            painter.end()
 
     # ---- shutdown ---------------------------------------------------------------------------
 
