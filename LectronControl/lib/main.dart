@@ -71,7 +71,7 @@ class _BoardTestAppState extends State<BoardTestApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '$appName — $boardName',
+      title: '$appName - $boardName',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
       home: Shell(controller: widget.controller),

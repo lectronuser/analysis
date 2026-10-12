@@ -42,7 +42,7 @@ class DeviceTransportFactory implements TransportFactory {
         final usb = port.transport == SerialPortTransport.usb;
         final description = port.description;
         ports.add(
-          PortInfo(name, description == null || description.isEmpty ? name : '$name  —  $description', usb: usb),
+          PortInfo(name, description == null || description.isEmpty ? name : '$name  -  $description', usb: usb),
         );
       } catch (_) {
         ports.add(PortInfo(name, name));
@@ -51,7 +51,7 @@ class DeviceTransportFactory implements TransportFactory {
       }
     }
     ports.sort((a, b) => a.usb != b.usb ? (a.usb ? -1 : 1) : a.id.compareTo(b.id));
-    ports.add(const PortInfo(udpId, 'UDP  —  listen on port $udpPort (SITL / Ethernet)'));
+    ports.add(const PortInfo(udpId, 'UDP  -  listen on port $udpPort (SITL / Ethernet)'));
     return ports;
   }
 

@@ -94,7 +94,7 @@ class FakeBoard implements TransportFactory {
 
   @override
   List<PortInfo> listPorts() => [
-    if (present) const PortInfo('/dev/ttyACM0', '/dev/ttyACM0  —  Lectron Pi5-H7', usb: true),
+    if (present) const PortInfo('/dev/ttyACM0', '/dev/ttyACM0  -  Lectron Pi5-H7', usb: true),
   ];
 
   @override

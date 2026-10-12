@@ -934,7 +934,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{APP_NAME} — {BOARD_NAME}")
+        self.setWindowTitle(f"{APP_NAME} - {BOARD_NAME}")
         self.resize(1320, 880)
 
         self.conn = None
@@ -1939,7 +1939,7 @@ class MainWindow(QMainWindow):
         self.port_box.blockSignals(True)
         self.port_box.clear()
         for p in ports:
-            self.port_box.addItem(f"{p.device}  —  {p.description}", p.device)
+            self.port_box.addItem(f"{p.device}  -  {p.description}", p.device)
         if not ports:
             self.port_box.addItem("No serial ports found", None)
         index = self.port_box.findData(current) if current else -1

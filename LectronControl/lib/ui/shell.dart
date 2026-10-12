@@ -83,13 +83,7 @@ class _TopBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Container(
-            width: 32,
-            height: 32,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(color: AppColors.accent, borderRadius: BorderRadius.circular(9)),
-            child: const Icon(Icons.memory, color: Colors.white, size: 20),
-          ),
+          Image.asset('assets/icon/app_icon.png', width: 32, height: 32, filterQuality: FilterQuality.medium),
           const SizedBox(width: 10),
           const Column(
             mainAxisAlignment: MainAxisAlignment.center,
