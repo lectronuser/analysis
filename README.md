@@ -30,3 +30,8 @@ And the name of files must be "pose_n.csv". n indicates the number of the file.
 ```
 this command will make trajectory_evaluator.py to read /home/your_user/data/pose_3.csv file and create new
 file named pose_3_report.pdf under the data directory and write results to this file.
+
+
+```
+QT_QPA_PLATFORM=xcb python3 board_test.py
+```
