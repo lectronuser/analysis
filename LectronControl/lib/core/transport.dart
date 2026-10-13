@@ -37,8 +37,10 @@ class DeviceTransportFactory implements TransportFactory {
   List<PortInfo> listPorts() {
     final ports = <PortInfo>[];
     for (final name in SerialPort.availablePorts) {
-      final port = SerialPort(name);
+      // a port can vanish between the listing and this lookup (board rebooting)
+      SerialPort? port;
       try {
+        port = SerialPort(name);
         final usb = port.transport == SerialPortTransport.usb;
         final description = port.description;
         ports.add(
@@ -47,7 +49,7 @@ class DeviceTransportFactory implements TransportFactory {
       } catch (_) {
         ports.add(PortInfo(name, name));
       } finally {
-        port.dispose();
+        port?.dispose();
       }
     }
     ports.sort((a, b) => a.usb != b.usb ? (a.usb ? -1 : 1) : a.id.compareTo(b.id));

@@ -29,11 +29,14 @@ class _MessagesPageState extends State<MessagesPage> {
 
   Future<void> _export(List<LogEntry> entries) async {
     final now = DateTime.now();
-    final location = await getSaveLocation(
-      suggestedName: 'board_test_${now.year}${two(now.month)}${two(now.day)}_${two(now.hour)}${two(now.minute)}.log',
-      acceptedTypeGroups: const [
-        XTypeGroup(label: 'Log files', extensions: ['log', 'txt']),
-      ],
+    final location = await fileDialog(
+      (m) => c.notify(m, sticky: true),
+      () => getSaveLocation(
+        suggestedName: 'board_test_${now.year}${two(now.month)}${two(now.day)}_${two(now.hour)}${two(now.minute)}.log',
+        acceptedTypeGroups: const [
+          XTypeGroup(label: 'Log files', extensions: ['log', 'txt']),
+        ],
+      ),
     );
     if (location == null) return;
     try {
@@ -127,7 +130,11 @@ class _MessagesPageState extends State<MessagesPage> {
                   if (logDir != null)
                     TextButton.icon(
                       onPressed: () {
-                        logDir.createSync(recursive: true);
+                        try {
+                          logDir.createSync(recursive: true);
+                        } catch (_) {
+                          // opening the parent still shows where it would be
+                        }
                         openExternally(logDir.path);
                       },
                       icon: const Icon(Icons.folder_open, size: 16),

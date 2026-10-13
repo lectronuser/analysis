@@ -53,6 +53,8 @@ static void my_application_activate(GApplication* application) {
   }
 
   gtk_window_set_default_size(window, 1400, 900);
+  // below this the top bar and the tables no longer fit
+  gtk_widget_set_size_request(GTK_WIDGET(window), 1000, 680);
 
   // Window icon: the Lectron mark that ships in the bundle's Flutter assets.
   g_autofree gchar* exe_path = g_file_read_link("/proc/self/exe", nullptr);

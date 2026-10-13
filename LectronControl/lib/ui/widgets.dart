@@ -19,6 +19,16 @@ Future<void> openExternally(String path) async {
   }
 }
 
+/// Runs a native file dialog; a desktop without one reports through [onError] instead of throwing.
+Future<T?> fileDialog<T>(void Function(String message) onError, Future<T?> Function() open) async {
+  try {
+    return await open();
+  } catch (e) {
+    onError('Could not open the file dialog: $e');
+    return null;
+  }
+}
+
 String parentDir(String path) => File(path).parent.path;
 
 class AppCard extends StatelessWidget {
@@ -385,6 +395,15 @@ class SyncedField extends StatefulWidget {
 class _SyncedFieldState extends State<SyncedField> {
   late final TextEditingController _text = TextEditingController(text: widget.value);
   final FocusNode _focus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    // leaving the field shows the value that was actually taken (e.g. after clearing a number)
+    _focus.addListener(() {
+      if (!_focus.hasFocus && _text.text != widget.value) _text.text = widget.value;
+    });
+  }
 
   @override
   void didUpdateWidget(SyncedField old) {

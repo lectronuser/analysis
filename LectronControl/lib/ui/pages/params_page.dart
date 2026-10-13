@@ -31,7 +31,10 @@ class _ParamsPageState extends State<ParamsPage> {
       c.notify('No parameters to save');
       return;
     }
-    final location = await getSaveLocation(suggestedName: 'board.param', acceptedTypeGroups: const [_paramFiles]);
+    final location = await fileDialog(
+      (m) => c.notify(m, sticky: true),
+      () => getSaveLocation(suggestedName: 'board.param', acceptedTypeGroups: const [_paramFiles]),
+    );
     if (location == null) return;
     try {
       await File(location.path).writeAsString(c.paramFileText());
@@ -42,11 +45,14 @@ class _ParamsPageState extends State<ParamsPage> {
   }
 
   Future<void> _loadFile() async {
-    final file = await openFile(
-      acceptedTypeGroups: const [
-        _paramFiles,
-        XTypeGroup(label: 'All files', extensions: ['*']),
-      ],
+    final file = await fileDialog(
+      (m) => c.notify(m, sticky: true),
+      () => openFile(
+        acceptedTypeGroups: const [
+          _paramFiles,
+          XTypeGroup(label: 'All files', extensions: ['*']),
+        ],
+      ),
     );
     if (file == null) return;
     try {
@@ -123,7 +129,8 @@ class _ParamsPageState extends State<ParamsPage> {
                   const SizedBox(width: 10),
                   CheckRow('Modified only', _modifiedOnly, (v) => setState(() => _modifiedOnly = v)),
                   OutlinedButton.icon(
-                    onPressed: c.params.isEmpty ? null : _loadFile,
+                    // compared against the whole list, so wait until it is downloaded
+                    onPressed: c.fullLoaded ? _loadFile : null,
                     icon: const Icon(Icons.upload_file, size: 16),
                     label: const Text('Load File…'),
                   ),

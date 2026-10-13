@@ -238,4 +238,41 @@ void main() {
     expect(data.log.rows.map((r) => r[2].text), contains(startsWith('Port test PX_USB1 USB 2.0: FAIL')));
     expect(data.boardInfo.last, ('Connection', '/dev/ttyACM0 @ 57600'));
   });
+
+  boardTest('parameter requests are paced and the port stays selected across a reboot', (tester, h) async {
+    final c = h.controller;
+    await c.toggleConnection();
+    await h.run(tester, 0.25);
+    // 117 requests do not fit into one tick at 57600 baud
+    final first = h.board.received.where((m) => m.type == 'PARAM_REQUEST_READ').length;
+    expect(first, inInclusiveRange(10, 100));
+    await h.run(tester, 7);
+    expect(c.paramsReady, isTrue);
+    final before = c.statusLog.length;
+    expect(before, greaterThan(0));
+
+    c.rebootBoard();
+    await h.run(tester, 2);
+    expect(c.connected, isFalse);
+    expect(c.ports, isEmpty);
+    await h.run(tester, 8);
+    expect(c.linkStatus.text, 'Connected');
+    expect(c.selectedPort, '/dev/ttyACM0');
+
+    await c.toggleConnection();
+    await c.toggleConnection();
+    expect(c.statusLog.length, greaterThanOrEqualTo(before)); // the session log survives a reconnect
+  });
+
+  boardTest('a lost link while writing fails the job instead of waiting for a reboot', (tester, h) async {
+    final c = h.controller;
+    await h.connect(tester);
+    c.portConfigs[2]!.protocol = 9;
+    h.board.link!.closed = true; // the board no longer answers
+    c.applyPorts();
+    h.board.link!.incoming.addError('device disconnected');
+    await h.run(tester, 0.5, telemetry: false);
+    expect(c.job, isNull);
+    expect(c.notice, contains('connection lost while writing'));
+  });
 }

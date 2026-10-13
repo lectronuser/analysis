@@ -43,7 +43,6 @@ DESKTOP
 cat > "$APPDIR/AppRun" <<'APPRUN'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
-export LD_LIBRARY_PATH="$HERE/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$HERE/lectron_control" "$@"
 APPRUN
 chmod +x "$APPDIR/AppRun"

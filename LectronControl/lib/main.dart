@@ -50,8 +50,7 @@ class BoardTestApp extends StatefulWidget {
 class _BoardTestAppState extends State<BoardTestApp> {
   late final AppLifecycleListener _lifecycle = AppLifecycleListener(
     onExitRequested: () async {
-      widget.controller.dispose();
-      await widget.controller.storage.close();
+      await widget.controller.shutdown();
       return AppExitResponse.exit;
     },
   );

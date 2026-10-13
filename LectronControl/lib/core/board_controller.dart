@@ -58,8 +58,9 @@ class BoardController extends ChangeNotifier {
       tests[spec.key] = TestState();
     }
     reportOperator = storage.getString('operator') ?? '';
-    selectedPort = storage.getString('port');
-    selectedBaud = storage.getInt('baud') ?? defaultBaud;
+    _preferredPort = selectedPort = storage.getString('port');
+    final baud = storage.getInt('baud');
+    selectedBaud = baud != null && baudRates.contains(baud) ? baud : defaultBaud;
     _applyTelem3Fitted();
     _ticker = Timer.periodic(const Duration(milliseconds: tickMs), (_) => _tick());
     refreshPorts();
@@ -84,6 +85,14 @@ class BoardController extends ChangeNotifier {
   List<PortInfo> ports = const [];
   String? selectedPort;
   int selectedBaud = defaultBaud;
+
+  /// The port the user picked or last connected to; it is selected again when it comes back.
+  String? _preferredPort;
+
+  // Frames waiting for room on the link, and the bytes that may still leave in this tick. A burst
+  // (a hundred parameter requests) would otherwise fill the serial buffer and block the window.
+  final List<Uint8List> _outbox = [];
+  int _sendBudget = 0;
 
   /// Port and baud of the current or last connection; the reboot job reopens these.
   String? portDevice;
@@ -264,13 +273,17 @@ class BoardController extends ChangeNotifier {
         [for (var i = 0; i < found.length; i++) found[i].id == ports[i].id].every((e) => e);
     if (same) return;
     ports = found;
-    final wanted = selectedPort ?? portDevice;
-    selectedPort = found.any((p) => p.id == wanted) ? wanted : (found.isEmpty ? null : found.first.id);
+    bool has(String? id) => id != null && found.any((p) => p.id == id);
+    if (has(_preferredPort)) {
+      selectedPort = _preferredPort;
+    } else if (!has(selectedPort)) {
+      selectedPort = found.isEmpty ? null : found.first.id;
+    }
     _changed();
   }
 
   void selectPort(String? id) {
-    selectedPort = id;
+    _preferredPort = selectedPort = id;
     _changed();
   }
 
@@ -296,7 +309,7 @@ class BoardController extends ChangeNotifier {
       notify('No port selected');
       return;
     }
-    statusLog.clear();
+    _preferredPort = port;
     storage.put('port', port);
     storage.put('baud', selectedBaud);
     await _openConnection(port, selectedBaud);
@@ -323,6 +336,8 @@ class BoardController extends ChangeNotifier {
     portBaud = baud;
     _resetState();
     _parser.reset();
+    _outbox.clear();
+    _drainOutbox();
     _sub = conn.bytes.listen(
       _onBytes,
       onError: (Object e) {
@@ -343,6 +358,7 @@ class BoardController extends ChangeNotifier {
     _sub = null;
     final conn = _conn;
     _conn = null;
+    _outbox.clear();
     if (conn != null) {
       unawaited(conn.close().catchError((Object _) {}));
       if (job == null) notify('Disconnected');
@@ -355,27 +371,57 @@ class BoardController extends ChangeNotifier {
   void _connectionError(String text) {
     _disconnectBoard();
     final job = this.job;
-    if (job != null && (job.stage == JobStage.reconnecting || job.stage == JobStage.heartbeat)) {
+    if (job == null) {
+      notify('Connection error: $text', sticky: true);
+    } else if (job.stage == JobStage.writing) {
+      // the link broke before the reboot was sent: nothing would bring the board back
+      _failJob('${job.title}: connection lost while writing ($text)');
+    } else if (job.stage != JobStage.rebooting) {
       job.stage = JobStage.reconnecting;
       job.nextTry = mono() + 1.0;
-    } else {
-      notify('Connection error: $text', sticky: true);
     }
+    // while rebooting the port is expected to drop; the reboot timer carries on from here
   }
 
   void _onBytes(Uint8List chunk) {
     for (final msg in _parser.add(chunk)) {
-      _handleMessage(msg);
+      try {
+        _handleMessage(msg);
+      } catch (e, stack) {
+        logException(e, stack);
+      }
     }
   }
 
   void _send(int msgId, Map<String, Object> fields) {
+    if (_conn == null) return;
+    final frame = _encoder.encode(msgId, fields);
+    if (_outbox.isEmpty && _sendBudget >= frame.length) {
+      _write(frame);
+    } else {
+      _outbox.add(frame);
+    }
+  }
+
+  void _write(Uint8List frame) {
     final conn = _conn;
     if (conn == null) return;
+    _sendBudget -= frame.length;
     try {
-      conn.write(_encoder.encode(msgId, fields));
+      conn.write(frame);
     } catch (e) {
       _connectionError(_errorText(e));
+    }
+  }
+
+  /// Gives the link what it can carry in one tick and sends the frames that were waiting.
+  void _drainOutbox() {
+    final baud = portBaud ?? defaultBaud;
+    final serial = !(portDevice?.startsWith('udp:') ?? false);
+    // 10 bits per byte, 80 % of the line; never less than one long frame
+    _sendBudget = serial ? math.max(300, baud * tickMs ~/ 12500) : 1 << 20;
+    while (_conn != null && _outbox.isNotEmpty && _sendBudget >= _outbox.first.length) {
+      _write(_outbox.removeAt(0));
     }
   }
 
@@ -419,6 +465,7 @@ class BoardController extends ChangeNotifier {
       _tickCount++;
       _checkActiveTest();
       _jobTick(now);
+      if (connected) _drainOutbox();
       if (connected) {
         if (_tickCount % (1000 ~/ tickMs) == 0) _sendHeartbeat();
         final retryAt = _paramRetryAt;
@@ -593,7 +640,10 @@ class BoardController extends ChangeNotifier {
   bool get paramsReady => paramNames.isNotEmpty && _paramRetryAt == null;
   bool get readingParams => _paramRetryAt != null;
 
-  int paramInt(String name) => params[name]?.round() ?? 0;
+  int paramInt(String name) {
+    final value = params[name];
+    return value != null && value.isFinite ? value.round() : 0;
+  }
 
   bool paramMissing(String name) => paramNames.contains(name) && !params.containsKey(name) && !readingParams;
 
@@ -904,17 +954,24 @@ class BoardController extends ChangeNotifier {
 
   // ---- shutdown -----------------------------------------------------------------------------------
 
-  @override
-  void dispose() {
+  /// Stops the timers and closes the link; used on exit, where the widgets still listen.
+  Future<void> shutdown() async {
+    if (_disposed) return;
     _disposed = true;
     job = null;
     _stopEthProbe();
     _ticker?.cancel();
     _noticeTimer?.cancel();
-    _sub?.cancel();
+    unawaited(_sub?.cancel());
     final conn = _conn;
     _conn = null;
-    if (conn != null) unawaited(conn.close().catchError((Object _) {}));
+    _outbox.clear();
+    if (conn != null) await conn.close().catchError((Object _) {});
+  }
+
+  @override
+  void dispose() {
+    unawaited(shutdown());
     super.dispose();
   }
 }

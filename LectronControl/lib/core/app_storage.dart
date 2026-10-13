@@ -11,8 +11,6 @@ class AppStorage {
   /// Null when no directory is available; the app then runs without persistence.
   final Directory? root;
 
-  IOSink? _sink;
-  String? _sinkDay;
   Map<String, Object?> _settings = {};
 
   Directory? get logDir => root == null ? null : Directory('${root!.path}${Platform.pathSeparator}logs');
@@ -37,8 +35,16 @@ class AppStorage {
     }
   }
 
-  String? getString(String key) => _settings[key] as String?;
-  int? getInt(String key) => _settings[key] as int?;
+  // a settings file edited by hand may hold anything
+  String? getString(String key) {
+    final value = _settings[key];
+    return value is String ? value : null;
+  }
+
+  int? getInt(String key) {
+    final value = _settings[key];
+    return value is int ? value : null;
+  }
 
   void put(String key, Object? value) {
     if (_settings[key] == value) return;
@@ -50,28 +56,16 @@ class AppStorage {
     }
   }
 
-  /// Appends one line to today's log file.
+  /// Appends one line to today's log file; written straight away so it survives a crash.
   void log(String level, String message) {
     final path = logPath;
     if (path == null) return;
     try {
-      if (_sink == null || _sinkDay != path) {
-        _sink?.close();
-        logDir!.createSync(recursive: true);
-        _sink = File(path).openWrite(mode: FileMode.append);
-        _sinkDay = path;
-      }
+      logDir!.createSync(recursive: true);
       final now = DateTime.now();
-      _sink!.writeln('${ymd(now)} ${hms(now)} ${level.padRight(7)} $message');
+      File(path).writeAsStringSync('${ymd(now)} ${hms(now)} ${level.padRight(7)} $message\n', mode: FileMode.append);
     } catch (_) {
-      _sink = null;
+      // a full or read-only disk must not stop the test
     }
-  }
-
-  Future<void> close() async {
-    final sink = _sink;
-    _sink = null;
-    await sink?.flush();
-    await sink?.close();
   }
 }

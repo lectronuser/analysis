@@ -216,7 +216,8 @@ extension _Messages on BoardController {
     if (isPx4 && Mav.intParamTypes.contains(type)) {
       value = m.floatBitsAsInt32('param_value');
     } else if (Mav.intParamTypes.contains(type)) {
-      value = m.d('param_value').round();
+      final raw = m.d('param_value');
+      value = raw.isFinite ? raw.round() : raw;
     } else {
       value = m.d('param_value');
     }
@@ -274,6 +275,7 @@ extension _Messages on BoardController {
   void _captureImu(int inst, MavMessage m, List<double> acc, List<double> gyro, double? temp) {
     final cap = imuCapture;
     if (cap == null || !cap.active) return;
+    if ([...acc, ...gyro].any((v) => !v.isFinite)) return;
     var t = m.i('time_usec') / 1e6;
     if (t == 0) t = m.i('time_boot_ms') / 1000;
     if (t == 0) t = mono();

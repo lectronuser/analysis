@@ -434,12 +434,15 @@ class _ReportCard extends StatelessWidget {
         'BoardTest_${safeId}_${now.year}${two(now.month)}${two(now.day)}_'
         '${two(now.hour)}${two(now.minute)}${two(now.second)}.pdf';
     final lastDir = c.storage.getString('reportDir');
-    final location = await getSaveLocation(
-      suggestedName: name,
-      initialDirectory: lastDir != null && Directory(lastDir).existsSync() ? lastDir : null,
-      acceptedTypeGroups: const [
-        XTypeGroup(label: 'PDF files', extensions: ['pdf']),
-      ],
+    final location = await fileDialog(
+      (m) => c.notify(m, sticky: true),
+      () => getSaveLocation(
+        suggestedName: name,
+        initialDirectory: lastDir != null && Directory(lastDir).existsSync() ? lastDir : null,
+        acceptedTypeGroups: const [
+          XTypeGroup(label: 'PDF files', extensions: ['pdf']),
+        ],
+      ),
     );
     if (location == null) return;
     var path = location.path;
