@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=LectronControl
+Exec=lectron_control
+Icon=lectron_control
+Type=Application
+Categories=Utility;
